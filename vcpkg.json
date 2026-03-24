@@ -1,0 +1,19 @@
+{
+  "name": "llm-preprocessor",
+  "version": "1.0.0",
+  "description": "A blazing fast C++ semantic router and preprocessor for LLMs.",
+  "dependencies": [
+    {
+      "name": "nlohmann-json",
+      "description": "JSON for Modern C++"
+    },
+    {
+      "name": "curl",
+      "description": "Multiprotocol file transfer library"
+    },
+    {
+      "name": "onnxruntime",
+      "description": "ONNX Runtime: cross-platform, high performance ML inferencing and training accelerator"
+    }
+  ]
+}
