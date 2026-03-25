@@ -3,21 +3,10 @@
   "version": "1.0.0",
   "description": "A blazing fast C++ semantic router and preprocessor for LLMs.",
   "dependencies": [
-    {
-      "name": "nlohmann-json",
-      "description": "JSON for Modern C++"
-    },
-    {
-      "name": "curl",
-      "description": "Multiprotocol file transfer library"
-    },
-    {
-      "name": "onnxruntime",
-      "description": "ONNX Runtime: cross-platform, high performance ML inferencing and training accelerator"
-    },
-    {
-      "name": "sqlite3",
-      "description": "SQLite is a software library that implements a self-contained, serverless, zero-configuration, transactional SQL database engine"
-    }
+    "nlohmann-json",
+    "curl",
+    "onnxruntime",
+    "sqlite3",
+    "gtest"
   ]
 }
