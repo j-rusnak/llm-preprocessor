@@ -10,7 +10,7 @@ enable_testing()
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(CURL REQUIRED)
 find_package(onnxruntime CONFIG REQUIRED)
-find_package(SQLite3 REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
 # --- 2. Define your Core Preprocessor Library ---
@@ -34,7 +34,7 @@ target_link_libraries(preprocessor_lib PUBLIC
     nlohmann_json::nlohmann_json
     CURL::libcurl
     onnxruntime
-    SQLite::SQLite3
+    unofficial::sqlite3::sqlite3
 )
 
 # --- 3. Define the Main Executable ---

@@ -51,6 +51,12 @@ std::optional<std::string> IntentRouter::route(const std::string& user_input) co
 }
 
 float IntentRouter::cosine_similarity(const std::vector<float>& a, const std::vector<float>& b) {
+    return detail::cosine_similarity(a, b);
+}
+
+namespace detail {
+
+float cosine_similarity(const std::vector<float>& a, const std::vector<float>& b) {
     if (a.size() != b.size()) {
         throw std::invalid_argument("Vectors must have the same dimensionality");
     }
@@ -68,5 +74,7 @@ float IntentRouter::cosine_similarity(const std::vector<float>& a, const std::ve
 
     return dot / (mag_a * mag_b);
 }
+
+} // namespace detail
 
 } // namespace preprocessor

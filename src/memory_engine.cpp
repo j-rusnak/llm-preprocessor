@@ -27,8 +27,20 @@ MemoryEngine::MemoryEngine(const std::string& db_path) {
     char* err_msg = nullptr;
     rc = sqlite3_exec(db_, create_sql, nullptr, nullptr, &err_msg);
     if (rc != SQLITE_OK) {
-        std::string err = err_msg;
-        sqlite3_free(err_msg);
+        std::string err;
+        if (err_msg) {
+            err = err_msg;
+            sqlite3_free(err_msg);
+        } else if (db_) {
+            err = sqlite3_errmsg(db_);
+        } else {
+            err = "unknown SQLite error";
+        }
+
+        if (db_) {
+            sqlite3_close(db_);
+            db_ = nullptr;
+        }
         throw std::runtime_error("Failed to create messages table: " + err);
     }
 }
@@ -74,10 +86,16 @@ std::vector<std::pair<std::string, std::string>> MemoryEngine::get_recent_histor
     sqlite3_bind_int(stmt, 1, limit);
 
     std::vector<std::pair<std::string, std::string>> messages;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         const char* role = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
         const char* content = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
         messages.emplace_back(role ? role : "", content ? content : "");
+    }
+
+    if (rc != SQLITE_DONE) {
+        std::string err = sqlite3_errmsg(db_);
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to read messages: " + err);
     }
 
     sqlite3_finalize(stmt);
