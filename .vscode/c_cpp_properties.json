@@ -1,20 +1,14 @@
 {
     "configurations": [
         {
-            "name": "Win32",
+            "name": "Default",
             "includePath": [
                 "${workspaceFolder}/**"
             ],
-            "defines": [
-                "_DEBUG",
-                "UNICODE",
-                "_UNICODE"
-            ],
-            "windowsSdkVersion": "10.0.26100.0",
-            "compilerPath": "cl.exe",
+            "defines": [],
             "cStandard": "c17",
             "cppStandard": "c++17",
-            "intelliSenseMode": "windows-msvc-x64",
+            "intelliSenseMode": "${default}",
             "configurationProvider": "ms-vscode.cmake-tools"
         }
     ],
