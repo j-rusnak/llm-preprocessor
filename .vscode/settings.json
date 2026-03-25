@@ -1,0 +1,6 @@
+{
+    "C_Cpp.errorSquiggles": "enabled",
+    "cmake.configureSettings": {
+        "CMAKE_TOOLCHAIN_FILE": "C:/Users/joeyr/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    }
+}

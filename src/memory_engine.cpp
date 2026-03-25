@@ -62,7 +62,7 @@ void MemoryEngine::add_message(const std::string& role, const std::string& conte
 }
 
 std::vector<std::pair<std::string, std::string>> MemoryEngine::get_recent_history(int limit) {
-    const char* sql = "SELECT role, content FROM messages ORDER BY timestamp DESC LIMIT ?;";
+    const char* sql = "SELECT role, content FROM messages ORDER BY id DESC LIMIT ?;";
 
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);

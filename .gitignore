@@ -42,3 +42,5 @@
 
 # other stuff
 models/*.onnx
+*.pc
+vcpkg_installed/

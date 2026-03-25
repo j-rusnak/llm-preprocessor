@@ -22,8 +22,9 @@ public:
 
     std::optional<std::string> route(const std::string& user_input) const;
 
-private:
     static float cosine_similarity(const std::vector<float>& a, const std::vector<float>& b);
+
+private:
 
     float threshold_;
     std::shared_ptr<EmbeddingEngine> engine_;
