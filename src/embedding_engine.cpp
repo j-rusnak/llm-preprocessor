@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <numeric>
 #include <cmath>
+#include <filesystem>
 
 namespace preprocessor {
 
@@ -21,8 +22,8 @@ EmbeddingEngine::EmbeddingEngine(const std::string& model_path,
 
     try {
 #ifdef _WIN32
-        std::wstring wide_path(model_path.begin(), model_path.end());
-        session_ = std::make_unique<Ort::Session>(env_, wide_path.c_str(), session_options_);
+        std::filesystem::path fs_path(model_path);
+        session_ = std::make_unique<Ort::Session>(env_, fs_path.wstring().c_str(), session_options_);
 #else
         session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), session_options_);
 #endif
