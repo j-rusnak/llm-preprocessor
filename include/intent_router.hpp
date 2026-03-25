@@ -14,6 +14,10 @@ struct Intent {
     std::vector<float> embedding;
 };
 
+namespace detail {
+    float cosine_similarity(const std::vector<float>& a, const std::vector<float>& b);
+} // namespace detail
+
 class IntentRouter {
 public:
     IntentRouter(float similarity_threshold, std::shared_ptr<EmbeddingEngine> engine);

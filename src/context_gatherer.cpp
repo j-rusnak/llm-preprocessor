@@ -40,6 +40,8 @@ std::string ContextGatherer::fetch_url(const std::string& url) {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "LLMPreprocessor/1.0");
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE, 10L * 1024 * 1024); // 10 MB limit
 
     CURLcode res = curl_easy_perform(curl);
     if (res != CURLE_OK) {
