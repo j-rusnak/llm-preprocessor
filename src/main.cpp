@@ -1,6 +1,7 @@
 #include "context_gatherer.hpp"
 #include "embedding_engine.hpp"
 #include "intent_router.hpp"
+#include "memory_engine.hpp"
 #include "tokenizer.hpp"
 
 #include <iostream>
@@ -9,6 +10,9 @@
 
 int main() {
     try {
+        // --- Memory Engine: conversation history via SQLite ---
+        preprocessor::MemoryEngine memory("history.db");
+
         // Load the tokenizer vocabulary and the ONNX embedding model.
         // Replace these paths with real files for production use.
         auto tokenizer = std::make_shared<preprocessor::Tokenizer>("vocab.txt");
@@ -49,6 +53,16 @@ int main() {
             }
         } else {
             std::cout << "No intent matched (below threshold).\n";
+        }
+
+        // --- Demonstrate the Memory Engine ---
+        memory.add_message("user", test_input);
+        memory.add_message("assistant", "Here is a summary of the article...");
+
+        std::cout << "\n=== Conversation History ===\n";
+        auto history = memory.get_recent_history(5);
+        for (const auto& [role, content] : history) {
+            std::cout << "[" << role << "] " << content << "\n";
         }
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
