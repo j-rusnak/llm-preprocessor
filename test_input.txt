@@ -1,0 +1,6 @@
+turn up the volume
+lower the volume
+mute audio
+lock my computer
+take a screenshot
+quit

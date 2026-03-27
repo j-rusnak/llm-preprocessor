@@ -1,0 +1,42 @@
+{
+    "model_path": "models/model.ort",
+    "vocab_path": "models/vocab.txt",
+    "db_path": "history.db",
+    "system_prompt": "You are a helpful AI assistant. Answer concisely and accurately.",
+    "similarity_threshold": 0.75,
+    "history_limit": 10,
+    "intents": [
+        {
+            "name": "ACTION_DECREASE_VOLUME",
+            "example": "turn down the volume"
+        },
+        {
+            "name": "ACTION_INCREASE_VOLUME",
+            "example": "turn up the volume"
+        },
+        {
+            "name": "ACTION_MUTE",
+            "example": "mute the sound"
+        },
+        {
+            "name": "ACTION_OPEN_FILE",
+            "example": "open the document file"
+        },
+        {
+            "name": "ACTION_CLOSE_FILE",
+            "example": "close the current file"
+        },
+        {
+            "name": "ACTION_TAKE_SCREENSHOT",
+            "example": "take a screenshot of the screen"
+        },
+        {
+            "name": "ACTION_OPEN_BROWSER",
+            "example": "open the web browser"
+        },
+        {
+            "name": "ACTION_LOCK_SCREEN",
+            "example": "lock my computer screen"
+        }
+    ]
+}
