@@ -3,7 +3,8 @@
         {
             "name": "Default",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/build/vcpkg_installed/x64-windows/include/onnxruntime"
             ],
             "defines": [],
             "cStandard": "c17",

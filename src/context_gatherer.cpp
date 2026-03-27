@@ -3,6 +3,8 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <algorithm>
+#include <cctype>
 
 #include <curl/curl.h>
 
@@ -59,6 +61,59 @@ std::string ContextGatherer::fetch_url(const std::string& url) {
     }
 
     return response_body;
+}
+
+std::vector<std::string> ContextGatherer::extract_urls(const std::string& text) {
+    std::vector<std::string> urls;
+    const std::string http_prefix = "http://";
+    const std::string https_prefix = "https://";
+
+    // Characters that are valid in a URL (RFC 3986 unreserved + common reserved).
+    auto is_url_char = [](char c) -> bool {
+        if (std::isalnum(static_cast<unsigned char>(c))) return true;
+        // unreserved: - . _ ~
+        // reserved subset commonly in URLs: : / ? # [ ] @ ! $ & ' ( ) * + , ; = %
+        static const std::string allowed = "-._~:/?#[]@!$&'()*+,;=%";
+        return allowed.find(c) != std::string::npos;
+    };
+
+    std::size_t pos = 0;
+    while (pos < text.size()) {
+        std::size_t start = std::string::npos;
+
+        std::size_t https_pos = text.find(https_prefix, pos);
+        std::size_t http_pos = text.find(http_prefix, pos);
+
+        // Pick whichever comes first.
+        if (https_pos != std::string::npos && (http_pos == std::string::npos || https_pos <= http_pos)) {
+            start = https_pos;
+        } else if (http_pos != std::string::npos) {
+            start = http_pos;
+        }
+
+        if (start == std::string::npos) break;
+
+        // Walk forward collecting URL characters.
+        std::size_t end = start;
+        while (end < text.size() && is_url_char(text[end])) {
+            ++end;
+        }
+
+        // Strip trailing punctuation that's likely sentence-ending, not part of the URL.
+        while (end > start && (text[end - 1] == '.' || text[end - 1] == ',' ||
+               text[end - 1] == ')' || text[end - 1] == ';')) {
+            --end;
+        }
+
+        std::string url = text.substr(start, end - start);
+        if (url.size() > 10) { // Must be longer than just "http://x"
+            urls.push_back(std::move(url));
+        }
+
+        pos = end;
+    }
+
+    return urls;
 }
 
 } // namespace preprocessor
