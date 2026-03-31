@@ -1,30 +1,22 @@
 #include "context_gatherer.hpp"
 
-#include <fstream>
-#include <sstream>
 #include <stdexcept>
 #include <algorithm>
 #include <cctype>
 #include <memory>
+#include <string>
 
 #include <curl/curl.h>
 
 namespace preprocessor {
 
-std::string ContextGatherer::read_file(const std::string& filepath) {
-    std::ifstream file(filepath);
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file: " + filepath);
-    }
-
-    std::ostringstream contents;
-    contents << file.rdbuf();
-    return contents.str();
-}
-
 std::size_t ContextGatherer::write_callback(char* ptr, std::size_t size,
                                             std::size_t nmemb, std::string* data) {
+    static constexpr std::size_t max_response_size = 10UL * 1024 * 1024; // 10 MB
     std::size_t total = size * nmemb;
+    if (data->size() + total > max_response_size) {
+        return 0; // Abort transfer — signals error to libcurl.
+    }
     data->append(ptr, total);
     return total;
 }
