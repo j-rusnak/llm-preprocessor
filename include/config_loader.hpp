@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <optional>
 
 namespace preprocessor {
 
@@ -14,6 +15,12 @@ struct Config {
     float similarity_threshold;
     int history_limit;
     std::vector<std::pair<std::string, std::vector<std::string>>> intents;
+
+    // Optional API request parameters (for complete payload mode).
+    std::optional<std::string> api_model;
+    std::optional<std::string> api_endpoint;
+    std::optional<float> temperature;
+    std::optional<int> max_tokens;
 };
 
 class ConfigLoader {

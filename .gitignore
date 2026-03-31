@@ -56,3 +56,4 @@ test_stderr.txt
 *.pc
 vcpkg_installed/
 build/
+benchmarks/results/

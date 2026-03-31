@@ -33,10 +33,10 @@ TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
 | **TextSanitizer** | `text_sanitizer.hpp` | Normalizes input — lowercases, collapses whitespace, trims. |
 | **Tokenizer** | `tokenizer.hpp` | WordPiece tokenizer compatible with BERT-based models. Dynamically resolves `[CLS]`/`[SEP]`/`[UNK]` IDs from the vocabulary and truncates at 512 tokens. |
 | **EmbeddingEngine** | `embedding_engine.hpp` | Generates vector embeddings from text via ONNX Runtime inference. Supports `.onnx` and `.ort` model formats with attention-mask-aware mean pooling. |
-| **IntentRouter** | `intent_router.hpp` | Compares input embeddings against registered intents using cosine similarity. Strips common stop words (pronouns, filler, connecting words) and uses sliding-window subphrase extraction to match commands embedded in longer sentences. Returns a local action name if the similarity exceeds a configurable threshold. |
-| **ContextGatherer** | `context_gatherer.hpp` | Fetches external context from URLs (`libcurl`, RAII-wrapped handles) and extracts URLs from user input. Restricted to HTTP/HTTPS with a 10 MB download limit. |
-| **MemoryEngine** | `memory_engine.hpp` | SQLite-backed conversation history. Stores and retrieves recent message pairs for multi-turn context. Supports move semantics. |
-| **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final JSON payload (system prompt + history + context-enriched user message) ready to send to any LLM API. |
+| **IntentRouter** | `intent_router.hpp` | Compares input embeddings against registered intents using cosine similarity. Strips common stop words and uses sliding-window subphrase extraction (capped at 15 ONNX inferences) to match commands in longer sentences. Returns a `RouteResult` with intent name and confidence score. Supports an action callback, plus runtime `remove_intent()` / `clear_intents()`. Thread-safe via `EmbeddingEngine` mutex. |
+| **ContextGatherer** | `context_gatherer.hpp` | Fetches external context from URLs (`libcurl`, RAII-wrapped handles) and extracts URLs from user input. Restricted to HTTP/HTTPS with a streaming-enforced 10 MB download limit. |
+| **MemoryEngine** | `memory_engine.hpp` | SQLite-backed conversation history. Stores, retrieves, updates (`update_last_message`), clears, and auto-prunes messages. Supports move semantics. |
+| **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final JSON payload. `build_payload()` returns a messages-only string (backward-compatible). `build_payload_json()` returns a `nlohmann::json` object with optional `model`/`temperature`/`max_tokens` for a complete API request body. |
 
 ## Tech Stack
 
@@ -46,7 +46,7 @@ TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
 - **libcurl** — HTTP fetching
 - **SQLite3** — conversation memory
 - **nlohmann/json** — JSON construction
-- **Google Test** — unit testing (63 tests across 8 suites)
+- **Google Test** — unit testing (76 tests across 8 suites)
 
 ## Project Structure
 
@@ -82,6 +82,11 @@ TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
 │   ├── test_prompt_compiler.cpp
 │   ├── test_text_sanitizer.cpp
 │   └── test_tokenizer.cpp
+├── benchmarks/
+│   ├── benchmark_runner.cpp    (C++ benchmark executable)
+│   ├── visualize.py            (Python chart generator)
+│   ├── run_benchmarks.ps1      (PowerShell orchestration)
+│   └── results/                (generated JSON + PNGs)
 ├── models/
 │   ├── model.onnx / model.ort  (ONNX embedding model)
 │   └── vocab.txt               (WordPiece vocabulary)
@@ -138,21 +143,12 @@ copy onnxruntime-win-x64-1.23.2\lib\onnxruntime.dll build\
 
 ## Testing
 
+See [Running the Test Suite](#running-the-test-suite) below for the full guide.
+
 ```bash
 cd build
 ctest --output-on-failure
 ```
-
-All 63 tests across 8 suites should pass:
-
-- **TextSanitizerTest** (5) — whitespace, case normalization
-- **IntentRouterTest** (5) — cosine similarity edge cases
-- **MemoryEngineTest** (7) — SQLite CRUD, ordering, limits, move semantics
-- **PromptCompilerTest** (4) — JSON payload construction
-- **UrlExtractionTest** (6) — URL parsing from text
-- **ConfigLoaderTest** (11) — config validation, defaults, multi-example parsing, backward compat
-- **TokenizerTest** (12) — WordPiece encoding, special tokens, truncation, subwords
-- **EmbeddingEngineTest** (2 + 11 integration) — construction validation, embedding shape/normalization/similarity, multi-example routing, sliding-window subphrase matching, stop-word filtering
 
 ## Configuration
 
@@ -164,7 +160,7 @@ The preprocessor is driven by a `config.json` file:
     "vocab_path": "models/vocab.txt",
     "db_path": "history.db",
     "system_prompt": "You are a helpful AI assistant.",
-    "similarity_threshold": 0.75,
+    "similarity_threshold": 0.65,
     "history_limit": 10,
     "intents": [
         {
@@ -187,16 +183,24 @@ Each intent supports multiple synonym examples via the `"examples"` array. The r
 | `vocab_path` | Path to the WordPiece vocab file | *(required)* |
 | `db_path` | SQLite database file for conversation history | `"history.db"` |
 | `system_prompt` | System message prepended to every LLM payload | `"You are a helpful assistant."` |
-| `similarity_threshold` | Cosine similarity cutoff for intent matching (0.0–1.0) | `0.75` |
+| `similarity_threshold` | Cosine similarity cutoff for intent matching (0.0–1.0) | `0.65` |
 | `history_limit` | Max conversation turns to include in payload | `10` |
 | `intents` | Array of `{name, examples}` objects for semantic routing | `[]` |
+| `api_model` | *(Optional)* Model name for complete API payload (e.g., `"gpt-4"`) | — |
+| `api_endpoint` | *(Optional)* API endpoint URL | — |
+| `temperature` | *(Optional)* Sampling temperature (0.0–2.0) | — |
+| `max_tokens` | *(Optional)* Max tokens in LLM response | — |
 
 ## Running
 
 ```powershell
 .\build\preprocessor_app.exe                  # uses config.json
 .\build\preprocessor_app.exe my_config.json   # custom config path
+.\build\preprocessor_app.exe --help            # show usage
+.\build\preprocessor_app.exe --version         # show version
 ```
+
+When `api_model` is set in config, payloads are emitted as complete API request bodies (`{model, messages, temperature, max_tokens}`). Without it, the old messages-only format is used.
 
 The interactive loop accepts free-text input:
 
@@ -267,6 +271,229 @@ if (matched) {
     std::string payload = compiler.build_payload(input, context, history);
     // Send payload to your LLM...
 }
+```
+
+## Benchmarks & Visualizations
+
+The project includes a full benchmarking and visualization pipeline for evaluating the semantic router's latency, accuracy, and similarity characteristics. This is useful for presentations, reports, and tuning.
+
+### Overview
+
+| Component | Location | Purpose |
+|---|---|---|
+| **Benchmark Runner** | `benchmarks/benchmark_runner.cpp` | C++ executable that runs 31 test prompts through the routing pipeline, collecting latency, accuracy, similarity scores, and embedding timing. Outputs structured JSON. |
+| **Visualization Script** | `benchmarks/visualize.py` | Python script that reads the JSON output and generates 10 presentation-ready PNG charts. |
+| **Orchestration Script** | `benchmarks/run_benchmarks.ps1` | PowerShell script that runs both steps end-to-end. |
+| **Results Directory** | `benchmarks/results/` | Output directory for JSON data and PNG charts. |
+
+### Prerequisites
+
+Ensure the project is already built (see [Build](#build) above), then install the Python dependencies:
+
+```bash
+pip install matplotlib numpy
+```
+
+### Quick Start (All-In-One)
+
+From the project root, run the PowerShell orchestration script:
+
+```powershell
+.\benchmarks\run_benchmarks.ps1
+```
+
+This will:
+1. Verify `benchmark_runner.exe` exists in `build/`
+2. Run the C++ benchmark → `benchmarks/results/benchmark_data.json`
+3. Generate all 10 PNG charts → `benchmarks/results/`
+
+### Step-by-Step (Manual)
+
+#### 1. Build the benchmark executable
+
+The benchmark target is included in the CMake build. If you haven't built yet:
+
+```powershell
+# From a VS Developer PowerShell:
+cmake -B build -G Ninja `
+    -DCMAKE_BUILD_TYPE=Debug `
+    -DCMAKE_TOOLCHAIN_FILE="C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+cmake --build build
+```
+
+Verify the executable exists:
+
+```powershell
+Test-Path .\build\benchmark_runner.exe   # should be True
+```
+
+#### 2. Run the benchmark
+
+The benchmark must be run from the **project root** so it can find `config.json` and `models/`:
+
+```powershell
+# Create results directory
+New-Item -ItemType Directory -Path benchmarks\results -Force | Out-Null
+
+# Run and capture JSON output
+.\build\benchmark_runner.exe > benchmarks\results\benchmark_data.json
+```
+
+The benchmark runs 5 phases:
+1. **Routing Benchmarks** — 31 test inputs × 10 runs each, measuring latency and correctness
+2. **Similarity Analysis** — per-input similarity scores against all 8 intents
+3. **Intent Similarity Matrix** — 8×8 cosine similarity between intents
+4. **Embedding Timing** — 9 different input lengths × 20 runs each
+5. **Tokenization Timing** — encoding speed for the same 9 inputs
+
+Progress is printed to `stderr`; JSON data goes to `stdout`.
+
+#### 3. Generate visualizations
+
+```powershell
+python benchmarks\visualize.py benchmarks\results\benchmark_data.json benchmarks\results
+```
+
+Arguments:
+- **Arg 1** (required): Path to the JSON data file
+- **Arg 2** (optional): Output directory for PNGs (default: `benchmarks/results`)
+
+### Generated Charts
+
+| # | File | Chart Type | What It Shows |
+|---|------|-----------|---------------|
+| 1 | `01_latency_by_category.png` | Bar chart (± std) | Average routing latency across 5 input categories |
+| 2 | `02_latency_vs_words.png` | Scatter + trend line | How routing latency scales with input word count |
+| 3 | `03_accuracy_by_category.png` | Bar chart | Percentage of correctly routed inputs per category |
+| 4 | `04_score_distribution.png` | Box plot | Distribution of best cosine similarity scores, with threshold overlay |
+| 5 | `05_similarity_heatmap.png` | Heatmap (8×8) | Cosine similarity between all registered intents (with formula) |
+| 6 | `06_threshold_curve.png` | Multi-line plot | Accuracy, Precision, Recall, and F1 across thresholds 0.40–0.95 |
+| 7 | `07_embedding_timing.png` | Bar chart (± error) | ONNX embedding generation time vs input length |
+| 8 | `08_api_comparison.png` | Log-scale bars | Local routing latency vs estimated LLM API round-trip times |
+| 9 | `09_per_input_scores.png` | Heatmap (31×8) | Every test input's similarity score against every intent |
+| 10 | `10_summary_dashboard.png` | Text dashboard | Configuration, accuracy, latency (P50/P95), throughput, optimal threshold |
+
+### Test Categories
+
+The 31 benchmark inputs span 5 complexity levels:
+
+| Category | Count | Examples |
+|---|---|---|
+| **Direct Commands** | 8 | `"mute the sound"`, `"turn up the volume"`, `"open a file"` |
+| **Noisy Commands** | 6 | `"hey bro can you mute that"`, `"yo dude turn up the volume please"` |
+| **Complex Sentences** | 6 | `"i was wondering if you could perhaps mute the audio"` |
+| **Non-Matching** | 6 | `"what is the meaning of life"`, `"tell me about quantum physics"` |
+| **Edge Cases** | 5 | `"mute"` (1 word), `"volume"`, `"mute the sound and open the browser"` (multi-intent) |
+
+### Benchmark JSON Schema
+
+The JSON output contains these top-level sections:
+
+```
+{
+  "config":                  { ... },  // threshold, num_intents, num_runs, etc.
+  "routing_results":         [ ... ],  // 31 entries with latency, correctness, scores
+  "similarity_analysis":     [ ... ],  // per-input scores against all intents
+  "intent_similarity_matrix": { ... }, // 8×8 matrix with labels
+  "embedding_timing":        [ ... ],  // 9 entries with avg/min/max/p50
+  "tokenization_timing":     [ ... ]   // 9 entries with timing + token count
+}
+```
+
+Each routing result includes: `category`, `input`, `expected_intent`, `matched_intent`, `score`, `correct`, `word_count`, and `latency` object with `avg_us`, `min_us`, `max_us`, `p50_us`, `p95_us`.
+
+## Running the Test Suite
+
+### Quick Run
+
+```powershell
+cd build
+ctest --output-on-failure
+```
+
+### Verbose Output
+
+```powershell
+cd build
+ctest --output-on-failure -V
+```
+
+### Run a Single Test Suite
+
+```powershell
+cd build
+.\preprocessor_tests.exe --gtest_filter="TextSanitizerTest.*"
+.\preprocessor_tests.exe --gtest_filter="IntentRouterTest.*"
+.\preprocessor_tests.exe --gtest_filter="MemoryEngineTest.*"
+.\preprocessor_tests.exe --gtest_filter="PromptCompilerTest.*"
+.\preprocessor_tests.exe --gtest_filter="UrlExtractionTest.*"
+.\preprocessor_tests.exe --gtest_filter="ConfigLoaderTest.*"
+.\preprocessor_tests.exe --gtest_filter="TokenizerTest.*"
+.\preprocessor_tests.exe --gtest_filter="EmbeddingEngineTest.*"
+```
+
+### Run a Single Test
+
+```powershell
+.\preprocessor_tests.exe --gtest_filter="ConfigLoaderTest.LoadValidConfig"
+```
+
+### List All Tests
+
+```powershell
+.\preprocessor_tests.exe --gtest_list_tests
+```
+
+### Test Suites
+
+| Suite | Tests | What It Covers |
+|---|---|---|
+| **TextSanitizerTest** | 5 | Whitespace collapsing, case normalization, trimming |
+| **IntentRouterTest** | 5 | Cosine similarity routing, edge cases, empty/identical embeddings |
+| **MemoryEngineTest** | 10 | SQLite CRUD, ordering, history limits, move semantics, update, clear, prune |
+| **PromptCompilerTest** | 7 | JSON payload construction, `build_payload_json`, API params |
+| **UrlExtractionTest** | 6 | URL detection in text (http/https, mixed content) |
+| **ConfigLoaderTest** | 18 | Config validation, defaults, multi-example parsing, backward compat, bounds checking |
+| **TokenizerTest** | 12 | WordPiece encoding, special tokens, truncation, subwords |
+| **EmbeddingEngineTest** | 13 | Shape, normalization, similarity, multi-example routing, sliding-window, stop-words |
+
+**Total: 76 unit tests + 11 integration tests (EmbeddingEngine) = 87 tests**
+
+## Complete Workflow Reference
+
+A full build-test-benchmark-visualize cycle from a clean state:
+
+```powershell
+# 0. Open a VS Developer PowerShell (MSVC environment)
+& "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64
+
+# 1. Configure
+cmake -B build -G Ninja `
+    -DCMAKE_BUILD_TYPE=Debug `
+    -DCMAKE_TOOLCHAIN_FILE="C:/Users/you/vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+# 2. Build everything (app + tests + benchmark)
+cmake --build build
+
+# 3. Copy ONNX Runtime DLL (Windows only)
+Copy-Item onnxruntime-win-x64-1.23.2\lib\onnxruntime.dll build\
+
+# 4. Run the test suite
+cd build
+ctest --output-on-failure
+cd ..
+
+# 5. Run the benchmark
+New-Item -ItemType Directory -Path benchmarks\results -Force | Out-Null
+.\build\benchmark_runner.exe > benchmarks\results\benchmark_data.json
+
+# 6. Generate visualizations
+pip install matplotlib numpy   # first time only
+python benchmarks\visualize.py benchmarks\results\benchmark_data.json benchmarks\results
+
+# 7. Run the application
+.\build\preprocessor_app.exe config.json
 ```
 
 ## License

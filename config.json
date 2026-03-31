@@ -3,7 +3,7 @@
     "vocab_path": "models/vocab.txt",
     "db_path": "history.db",
     "system_prompt": "You are a helpful AI assistant. Answer concisely and accurately.",
-    "similarity_threshold": 0.75,
+    "similarity_threshold": 0.65,
     "history_limit": 10,
     "intents": [
         {
@@ -14,7 +14,9 @@
                 "decrease the sound level",
                 "make it quieter",
                 "reduce the volume please",
-                "turn it down"
+                "turn it down",
+                "it is too loud",
+                "lower the noise"
             ]
         },
         {
@@ -45,7 +47,9 @@
                 "open the document file",
                 "open a file",
                 "launch this file",
-                "open the file for me"
+                "open the file for me",
+                "open this document",
+                "load the file"
             ]
         },
         {
@@ -54,7 +58,9 @@
                 "close the current file",
                 "close this file",
                 "shut the file",
-                "close the document"
+                "close the document",
+                "exit the file",
+                "close it"
             ]
         },
         {
@@ -64,7 +70,8 @@
                 "capture the screen",
                 "grab a screenshot",
                 "screenshot this",
-                "take a screen capture"
+                "take a screen capture",
+                "snap the screen"
             ]
         },
         {
@@ -84,7 +91,8 @@
                 "lock the screen",
                 "lock my pc",
                 "secure the workstation",
-                "lock the computer"
+                "lock the computer",
+                "lock it down"
             ]
         }
     ]

@@ -109,7 +109,8 @@ TEST_F(EmbeddingEngineIntegrationTest, MultiExampleMuteMatches) {
 
     auto result = router.route("please mute");
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, "ACTION_MUTE");
+    EXPECT_EQ(result->intent_name, "ACTION_MUTE");
+    EXPECT_GT(result->score, 0.0f);
 }
 
 TEST_F(EmbeddingEngineIntegrationTest, MultiExampleVolumeDownMatches) {
@@ -128,7 +129,8 @@ TEST_F(EmbeddingEngineIntegrationTest, MultiExampleVolumeDownMatches) {
 
     auto result = router.route("turn the volume down please");
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, "ACTION_DECREASE_VOLUME");
+    EXPECT_EQ(result->intent_name, "ACTION_DECREASE_VOLUME");
+    EXPECT_GT(result->score, 0.0f);
 }
 
 TEST_F(EmbeddingEngineIntegrationTest, MultiExampleDoesNotFalseMatch) {
@@ -165,7 +167,7 @@ TEST_F(EmbeddingEngineIntegrationTest, NoisyMuteInputMatchesViaSubphrase) {
 
     auto result = router.route("yo bro can you mute that");
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, "ACTION_MUTE");
+    EXPECT_EQ(result->intent_name, "ACTION_MUTE");
 }
 
 TEST_F(EmbeddingEngineIntegrationTest, NoisyVolumeDownMatchesViaSubphrase) {
@@ -184,7 +186,7 @@ TEST_F(EmbeddingEngineIntegrationTest, NoisyVolumeDownMatchesViaSubphrase) {
 
     auto result = router.route("hey computer turn the volume down please");
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, "ACTION_DECREASE_VOLUME");
+    EXPECT_EQ(result->intent_name, "ACTION_DECREASE_VOLUME");
 }
 
 TEST_F(EmbeddingEngineIntegrationTest, SubphraseDoesNotFalseMatch) {
@@ -222,7 +224,7 @@ TEST_F(EmbeddingEngineIntegrationTest, StopWordFilteredVolumeDown) {
     // After stop-word removal: "turn volume down" — matches "turn down the volume"
     auto result = router.route("could you turn the volume down for me");
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, "ACTION_DECREASE_VOLUME");
+    EXPECT_EQ(result->intent_name, "ACTION_DECREASE_VOLUME");
 }
 
 TEST_F(EmbeddingEngineIntegrationTest, StopWordFilteredMute) {
@@ -240,5 +242,5 @@ TEST_F(EmbeddingEngineIntegrationTest, StopWordFilteredMute) {
     // After stop-word removal: "mute thing"
     auto result = router.route("could you please mute that thing");
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, "ACTION_MUTE");
+    EXPECT_EQ(result->intent_name, "ACTION_MUTE");
 }

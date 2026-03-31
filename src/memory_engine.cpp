@@ -121,4 +121,60 @@ std::vector<std::pair<std::string, std::string>> MemoryEngine::get_recent_histor
     return messages;
 }
 
+void MemoryEngine::update_last_message(const std::string& content) {
+    const char* sql =
+        "UPDATE messages SET content = ? WHERE id = (SELECT MAX(id) FROM messages);";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        throw std::runtime_error(
+            std::string("Failed to prepare UPDATE statement: ") + sqlite3_errmsg(db_));
+    }
+
+    sqlite3_bind_text(stmt, 1, content.c_str(), static_cast<int>(content.size()), SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        throw std::runtime_error(
+            std::string("Failed to update last message: ") + sqlite3_errmsg(db_));
+    }
+}
+
+void MemoryEngine::clear_history() {
+    const char* sql = "DELETE FROM messages;";
+    char* err_msg = nullptr;
+    int rc = sqlite3_exec(db_, sql, nullptr, nullptr, &err_msg);
+    if (rc != SQLITE_OK) {
+        std::string err;
+        if (err_msg) { err = err_msg; sqlite3_free(err_msg); }
+        else { err = sqlite3_errmsg(db_); }
+        throw std::runtime_error("Failed to clear history: " + err);
+    }
+}
+
+void MemoryEngine::prune(int max_rows) {
+    const char* sql =
+        "DELETE FROM messages WHERE id NOT IN "
+        "(SELECT id FROM messages ORDER BY id DESC LIMIT ?);";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        throw std::runtime_error(
+            std::string("Failed to prepare prune statement: ") + sqlite3_errmsg(db_));
+    }
+
+    sqlite3_bind_int(stmt, 1, max_rows);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        throw std::runtime_error(
+            std::string("Failed to prune messages: ") + sqlite3_errmsg(db_));
+    }
+}
+
 } // namespace preprocessor
