@@ -42,6 +42,17 @@
 
 # other stuff
 models/*.onnx
+models/*.ort
+models/vocab.txt
+models/config.json
+onnxruntime-win-x64-*/
+onnxruntime-linux-x64-*/
+onnxruntime-osx-*/
+*.zip
+history.db
+test_input.txt
+test_stdout.txt
+test_stderr.txt
 *.pc
 vcpkg_installed/
 build/

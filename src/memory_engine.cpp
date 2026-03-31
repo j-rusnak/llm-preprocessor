@@ -51,6 +51,22 @@ MemoryEngine::~MemoryEngine() {
     }
 }
 
+MemoryEngine::MemoryEngine(MemoryEngine&& other) noexcept
+    : db_(other.db_) {
+    other.db_ = nullptr;
+}
+
+MemoryEngine& MemoryEngine::operator=(MemoryEngine&& other) noexcept {
+    if (this != &other) {
+        if (db_) {
+            sqlite3_close(db_);
+        }
+        db_ = other.db_;
+        other.db_ = nullptr;
+    }
+    return *this;
+}
+
 void MemoryEngine::add_message(const std::string& role, const std::string& content) {
     const char* sql = "INSERT INTO messages (role, content) VALUES (?, ?);";
 

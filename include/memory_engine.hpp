@@ -15,8 +15,8 @@ public:
 
     MemoryEngine(const MemoryEngine&) = delete;
     MemoryEngine& operator=(const MemoryEngine&) = delete;
-    MemoryEngine(MemoryEngine&&) = delete;
-    MemoryEngine& operator=(MemoryEngine&&) = delete;
+    MemoryEngine(MemoryEngine&& other) noexcept;
+    MemoryEngine& operator=(MemoryEngine&& other) noexcept;
 
     void add_message(const std::string& role, const std::string& content);
     std::vector<std::pair<std::string, std::string>> get_recent_history(int limit = 5);

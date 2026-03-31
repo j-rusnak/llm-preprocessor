@@ -99,17 +99,22 @@ std::vector<float> EmbeddingEngine::generate_embedding(const std::string& text) 
 
     std::vector<float> embedding;
     if (shape.size() == 3) {
-        // [batch=1, seq_len, hidden_dim] — mean pooling
+        // [batch=1, seq_len, hidden_dim] — attention-mask-aware mean pooling
         auto seq_len = static_cast<std::size_t>(shape[1]);
         auto hidden_dim = static_cast<std::size_t>(shape[2]);
         embedding.resize(hidden_dim, 0.0f);
+        float mask_sum = 0.0f;
         for (std::size_t t = 0; t < seq_len; ++t) {
+            float mask_val = static_cast<float>(attention_mask[t]);
+            mask_sum += mask_val;
             for (std::size_t d = 0; d < hidden_dim; ++d) {
-                embedding[d] += raw_output[t * hidden_dim + d];
+                embedding[d] += raw_output[t * hidden_dim + d] * mask_val;
             }
         }
-        for (auto& val : embedding) {
-            val /= static_cast<float>(seq_len);
+        if (mask_sum > 0.0f) {
+            for (auto& val : embedding) {
+                val /= mask_sum;
+            }
         }
     } else {
         // [1, hidden_dim] or flat — use as-is

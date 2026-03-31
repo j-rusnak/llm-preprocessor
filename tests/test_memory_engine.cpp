@@ -68,3 +68,26 @@ TEST_F(MemoryEngineTest, HandlesSpecialCharacters) {
     ASSERT_EQ(history.size(), 1u);
     EXPECT_EQ(history[0].second, "Hello \"world\" it's <html> & stuff; DROP TABLE messages;");
 }
+
+TEST_F(MemoryEngineTest, MoveConstructorTransfersOwnership) {
+    preprocessor::MemoryEngine engine1(db_path_);
+    engine1.add_message("user", "test message");
+
+    preprocessor::MemoryEngine engine2(std::move(engine1));
+
+    auto history = engine2.get_recent_history(10);
+    ASSERT_EQ(history.size(), 1u);
+    EXPECT_EQ(history[0].second, "test message");
+}
+
+TEST_F(MemoryEngineTest, MoveAssignmentTransfersOwnership) {
+    preprocessor::MemoryEngine engine1(db_path_);
+    engine1.add_message("user", "original");
+
+    preprocessor::MemoryEngine engine2(":memory:");
+    engine2 = std::move(engine1);
+
+    auto history = engine2.get_recent_history(10);
+    ASSERT_EQ(history.size(), 1u);
+    EXPECT_EQ(history[0].second, "original");
+}

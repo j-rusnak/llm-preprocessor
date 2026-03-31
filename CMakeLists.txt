@@ -13,13 +13,36 @@ find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
 # --- ONNX Runtime (official pre-built binary) ---
-set(ORT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-win-x64-1.23.2")
+if(WIN32)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(ORT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-win-x64-1.23.2")
+    else()
+        set(ORT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-win-x86-1.23.2")
+    endif()
+elseif(APPLE)
+    set(ORT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-osx-universal2-1.23.2")
+else()
+    set(ORT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-linux-x64-1.23.2")
+endif()
+
 add_library(onnxruntime SHARED IMPORTED)
-set_target_properties(onnxruntime PROPERTIES
-    IMPORTED_IMPLIB "${ORT_ROOT}/lib/onnxruntime.lib"
-    IMPORTED_LOCATION "${ORT_ROOT}/lib/onnxruntime.dll"
-    INTERFACE_INCLUDE_DIRECTORIES "${ORT_ROOT}/include"
-)
+if(WIN32)
+    set_target_properties(onnxruntime PROPERTIES
+        IMPORTED_IMPLIB "${ORT_ROOT}/lib/onnxruntime.lib"
+        IMPORTED_LOCATION "${ORT_ROOT}/lib/onnxruntime.dll"
+        INTERFACE_INCLUDE_DIRECTORIES "${ORT_ROOT}/include"
+    )
+else()
+    set_target_properties(onnxruntime PROPERTIES
+        IMPORTED_LOCATION "${ORT_ROOT}/lib/libonnxruntime.so"
+        INTERFACE_INCLUDE_DIRECTORIES "${ORT_ROOT}/include"
+    )
+    if(APPLE)
+        set_target_properties(onnxruntime PROPERTIES
+            IMPORTED_LOCATION "${ORT_ROOT}/lib/libonnxruntime.dylib"
+        )
+    endif()
+endif()
 
 # --- 2. Define your Core Preprocessor Library ---
 add_library(preprocessor_lib
@@ -60,6 +83,8 @@ add_executable(preprocessor_tests
     tests/test_prompt_compiler.cpp
     tests/test_context_gatherer.cpp
     tests/test_config_loader.cpp
+    tests/test_tokenizer.cpp
+    tests/test_embedding_engine.cpp
 )
 
 target_link_libraries(preprocessor_tests PRIVATE

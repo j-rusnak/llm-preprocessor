@@ -12,7 +12,12 @@
 #include <memory>
 #include <string>
 
+#include <curl/curl.h>
+
 int main(int argc, char* argv[]) {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
+    int exit_code = 0;
     try {
         // --- 1. Load configuration ---
         std::string config_path = "config.json";
@@ -102,8 +107,9 @@ int main(int argc, char* argv[]) {
 
     } catch (const std::exception& e) {
         std::cerr << "Fatal: " << e.what() << "\n";
-        return 1;
+        exit_code = 1;
     }
 
-    return 0;
+    curl_global_cleanup();
+    return exit_code;
 }

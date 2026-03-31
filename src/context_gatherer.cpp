@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cctype>
+#include <memory>
 
 #include <curl/curl.h>
 
@@ -29,32 +30,30 @@ std::size_t ContextGatherer::write_callback(char* ptr, std::size_t size,
 }
 
 std::string ContextGatherer::fetch_url(const std::string& url) {
-    CURL* curl = curl_easy_init();
+    auto curl = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>(
+        curl_easy_init(), curl_easy_cleanup);
     if (!curl) {
         throw std::runtime_error("Failed to initialize libcurl");
     }
 
     std::string response_body;
 
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "LLMPreprocessor/1.0");
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE, 10L * 1024 * 1024); // 10 MB limit
+    curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &response_body);
+    curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "LLMPreprocessor/1.0");
+    curl_easy_setopt(curl.get(), CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(curl.get(), CURLOPT_MAXFILESIZE, 10L * 1024 * 1024); // 10 MB limit
 
-    CURLcode res = curl_easy_perform(curl);
+    CURLcode res = curl_easy_perform(curl.get());
     if (res != CURLE_OK) {
-        std::string error = curl_easy_strerror(res);
-        curl_easy_cleanup(curl);
-        throw std::runtime_error("curl request failed: " + error);
+        throw std::runtime_error(std::string("curl request failed: ") + curl_easy_strerror(res));
     }
 
     long http_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-    curl_easy_cleanup(curl);
+    curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
 
     if (http_code != 200) {
         throw std::runtime_error("HTTP request returned status " + std::to_string(http_code));
