@@ -1,0 +1,91 @@
+{
+    "model_path": "models/model.ort",
+    "vocab_path": "models/vocab.txt",
+    "db_path": "history.db",
+    "system_prompt": "You are a helpful AI assistant. Answer concisely and accurately.",
+    "similarity_threshold": 0.75,
+    "history_limit": 10,
+    "intents": [
+        {
+            "name": "ACTION_DECREASE_VOLUME",
+            "examples": [
+                "turn down the volume",
+                "lower the volume",
+                "decrease the sound level",
+                "make it quieter",
+                "reduce the volume please",
+                "turn it down"
+            ]
+        },
+        {
+            "name": "ACTION_INCREASE_VOLUME",
+            "examples": [
+                "turn up the volume",
+                "raise the volume",
+                "increase the sound level",
+                "make it louder",
+                "crank up the volume",
+                "turn it up"
+            ]
+        },
+        {
+            "name": "ACTION_MUTE",
+            "examples": [
+                "mute the sound",
+                "silence the audio",
+                "please mute",
+                "turn off the sound",
+                "mute everything",
+                "mute it"
+            ]
+        },
+        {
+            "name": "ACTION_OPEN_FILE",
+            "examples": [
+                "open the document file",
+                "open a file",
+                "launch this file",
+                "open the file for me"
+            ]
+        },
+        {
+            "name": "ACTION_CLOSE_FILE",
+            "examples": [
+                "close the current file",
+                "close this file",
+                "shut the file",
+                "close the document"
+            ]
+        },
+        {
+            "name": "ACTION_TAKE_SCREENSHOT",
+            "examples": [
+                "take a screenshot of the screen",
+                "capture the screen",
+                "grab a screenshot",
+                "screenshot this",
+                "take a screen capture"
+            ]
+        },
+        {
+            "name": "ACTION_OPEN_BROWSER",
+            "examples": [
+                "open the web browser",
+                "launch the browser",
+                "start the internet browser",
+                "open a browser window",
+                "go to the web"
+            ]
+        },
+        {
+            "name": "ACTION_LOCK_SCREEN",
+            "examples": [
+                "lock my computer screen",
+                "lock the screen",
+                "lock my pc",
+                "secure the workstation",
+                "lock the computer"
+            ]
+        }
+    ]
+}

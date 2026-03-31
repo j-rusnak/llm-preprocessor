@@ -10,6 +10,14 @@ namespace preprocessor {
 
 Tokenizer::Tokenizer(const std::string& vocab_path) {
     load_vocab(vocab_path);
+
+    // Resolve special token IDs from the loaded vocabulary.
+    auto it_cls = vocab_.find("[CLS]");
+    if (it_cls != vocab_.end()) cls_token_id_ = it_cls->second;
+    auto it_sep = vocab_.find("[SEP]");
+    if (it_sep != vocab_.end()) sep_token_id_ = it_sep->second;
+    auto it_unk = vocab_.find("[UNK]");
+    if (it_unk != vocab_.end()) unk_token_id_ = it_unk->second;
 }
 
 void Tokenizer::load_vocab(const std::string& vocab_path) {
@@ -65,14 +73,19 @@ std::vector<std::string> Tokenizer::basic_tokenize(const std::string& text) cons
 
 std::vector<int64_t> Tokenizer::encode(const std::string& text) const {
     std::vector<int64_t> token_ids;
-    token_ids.push_back(cls_token_id); // [CLS]
+    token_ids.push_back(cls_token_id_); // [CLS]
+
+    // Reserve room for [CLS] and [SEP].
+    const std::size_t max_content_tokens = max_sequence_length - 2;
 
     std::vector<std::string> words = basic_tokenize(text);
 
     for (const auto& word : words) {
+        if (token_ids.size() - 1 >= max_content_tokens) break;
+
         // If the word is excessively long, treat the whole thing as [UNK].
         if (word.size() > max_word_length) {
-            token_ids.push_back(unk_token_id);
+            token_ids.push_back(unk_token_id_);
             continue;
         }
 
@@ -81,6 +94,8 @@ std::vector<int64_t> Tokenizer::encode(const std::string& text) const {
         bool is_unknown = false;
 
         while (start < word.size()) {
+            if (token_ids.size() - 1 >= max_content_tokens) break;
+
             std::size_t end = word.size();
             bool found = false;
 
@@ -111,11 +126,11 @@ std::vector<int64_t> Tokenizer::encode(const std::string& text) const {
         }
 
         if (is_unknown) {
-            token_ids.push_back(unk_token_id);
+            token_ids.push_back(unk_token_id_);
         }
     }
 
-    token_ids.push_back(sep_token_id); // [SEP]
+    token_ids.push_back(sep_token_id_); // [SEP]
     return token_ids;
 }
 
