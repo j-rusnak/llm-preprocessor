@@ -8,35 +8,84 @@
     "intents": [
         {
             "name": "ACTION_DECREASE_VOLUME",
-            "example": "turn down the volume"
+            "examples": [
+                "turn down the volume",
+                "lower the volume",
+                "decrease the sound level",
+                "make it quieter",
+                "reduce the volume please",
+                "turn it down"
+            ]
         },
         {
             "name": "ACTION_INCREASE_VOLUME",
-            "example": "turn up the volume"
+            "examples": [
+                "turn up the volume",
+                "raise the volume",
+                "increase the sound level",
+                "make it louder",
+                "crank up the volume",
+                "turn it up"
+            ]
         },
         {
             "name": "ACTION_MUTE",
-            "example": "mute the sound"
+            "examples": [
+                "mute the sound",
+                "silence the audio",
+                "please mute",
+                "turn off the sound",
+                "mute everything",
+                "mute it"
+            ]
         },
         {
             "name": "ACTION_OPEN_FILE",
-            "example": "open the document file"
+            "examples": [
+                "open the document file",
+                "open a file",
+                "launch this file",
+                "open the file for me"
+            ]
         },
         {
             "name": "ACTION_CLOSE_FILE",
-            "example": "close the current file"
+            "examples": [
+                "close the current file",
+                "close this file",
+                "shut the file",
+                "close the document"
+            ]
         },
         {
             "name": "ACTION_TAKE_SCREENSHOT",
-            "example": "take a screenshot of the screen"
+            "examples": [
+                "take a screenshot of the screen",
+                "capture the screen",
+                "grab a screenshot",
+                "screenshot this",
+                "take a screen capture"
+            ]
         },
         {
             "name": "ACTION_OPEN_BROWSER",
-            "example": "open the web browser"
+            "examples": [
+                "open the web browser",
+                "launch the browser",
+                "start the internet browser",
+                "open a browser window",
+                "go to the web"
+            ]
         },
         {
             "name": "ACTION_LOCK_SCREEN",
-            "example": "lock my computer screen"
+            "examples": [
+                "lock my computer screen",
+                "lock the screen",
+                "lock my pc",
+                "secure the workstation",
+                "lock the computer"
+            ]
         }
     ]
 }

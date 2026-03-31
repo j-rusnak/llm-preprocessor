@@ -13,7 +13,7 @@ struct Config {
     std::string system_prompt;
     float similarity_threshold;
     int history_limit;
-    std::vector<std::pair<std::string, std::string>> intents;
+    std::vector<std::pair<std::string, std::vector<std::string>>> intents;
 };
 
 class ConfigLoader {

@@ -48,7 +48,8 @@ TEST_F(ConfigLoaderTest, LoadsCustomValues) {
     EXPECT_EQ(config.history_limit, 20);
     ASSERT_EQ(config.intents.size(), 1u);
     EXPECT_EQ(config.intents[0].first, "VOLUME_UP");
-    EXPECT_EQ(config.intents[0].second, "increase volume");
+    ASSERT_EQ(config.intents[0].second.size(), 1u);
+    EXPECT_EQ(config.intents[0].second[0], "increase volume");
 }
 
 TEST_F(ConfigLoaderTest, RejectsInvalidThreshold) {
@@ -72,5 +73,44 @@ TEST_F(ConfigLoaderTest, RejectsInvalidJson) {
 
 TEST_F(ConfigLoaderTest, RejectsIntentWithoutName) {
     write_config(R"({"intents": [{"example": "test"}]})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, LoadsMultipleExamples) {
+    write_config(R"({
+        "intents": [
+            {"name": "MUTE", "examples": ["mute audio", "silence sound", "please mute"]}
+        ]
+    })");
+    auto config = preprocessor::ConfigLoader::load(temp_path_);
+
+    ASSERT_EQ(config.intents.size(), 1u);
+    EXPECT_EQ(config.intents[0].first, "MUTE");
+    ASSERT_EQ(config.intents[0].second.size(), 3u);
+    EXPECT_EQ(config.intents[0].second[0], "mute audio");
+    EXPECT_EQ(config.intents[0].second[1], "silence sound");
+    EXPECT_EQ(config.intents[0].second[2], "please mute");
+}
+
+TEST_F(ConfigLoaderTest, BackwardCompatSingleExample) {
+    write_config(R"({
+        "intents": [
+            {"name": "OPEN", "example": "open the file"}
+        ]
+    })");
+    auto config = preprocessor::ConfigLoader::load(temp_path_);
+
+    ASSERT_EQ(config.intents.size(), 1u);
+    ASSERT_EQ(config.intents[0].second.size(), 1u);
+    EXPECT_EQ(config.intents[0].second[0], "open the file");
+}
+
+TEST_F(ConfigLoaderTest, RejectsIntentWithNoExamples) {
+    write_config(R"({"intents": [{"name": "EMPTY", "examples": []}]})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsIntentWithoutExampleOrExamples) {
+    write_config(R"({"intents": [{"name": "NOEX"}]})");
     EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
 }

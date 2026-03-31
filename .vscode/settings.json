@@ -4,6 +4,8 @@
         "CMAKE_TOOLCHAIN_FILE": "C:/Users/joeyr/vcpkg/scripts/buildsystems/vcpkg.cmake"
     },
     "chat.tools.terminal.autoApprove": {
-        ".\\build\\preprocessor_app.exe": true
+        ".\\build\\preprocessor_app.exe": true,
+        ".\\build\\preprocessor_tests.exe": true,
+        "ctest": true
     }
 }

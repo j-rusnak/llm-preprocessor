@@ -38,12 +38,28 @@ Config ConfigLoader::load(const std::string& filepath) {
 
     if (j.contains("intents") && j["intents"].is_array()) {
         for (const auto& intent : j["intents"]) {
-            if (!intent.contains("name") || !intent.contains("example")) {
-                throw std::invalid_argument("Each intent must have 'name' and 'example' fields");
+            if (!intent.contains("name")) {
+                throw std::invalid_argument("Each intent must have a 'name' field");
             }
-            config.intents.emplace_back(
-                intent["name"].get<std::string>(),
-                intent["example"].get<std::string>());
+
+            std::string name = intent["name"].get<std::string>();
+            std::vector<std::string> examples;
+
+            if (intent.contains("examples") && intent["examples"].is_array()) {
+                for (const auto& ex : intent["examples"]) {
+                    examples.push_back(ex.get<std::string>());
+                }
+            } else if (intent.contains("example")) {
+                examples.push_back(intent["example"].get<std::string>());
+            } else {
+                throw std::invalid_argument("Each intent must have 'example' or 'examples' field");
+            }
+
+            if (examples.empty()) {
+                throw std::invalid_argument("Intent '" + name + "' must have at least one example");
+            }
+
+            config.intents.emplace_back(std::move(name), std::move(examples));
         }
     }
 
