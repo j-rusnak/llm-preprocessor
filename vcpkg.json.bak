@@ -5,6 +5,7 @@
   "dependencies": [
     "nlohmann-json",
     "curl",
+    "sqlite3",
     "gtest"
   ]
 }

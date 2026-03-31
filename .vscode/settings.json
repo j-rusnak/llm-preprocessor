@@ -7,8 +7,6 @@
         ".\\build\\preprocessor_app.exe": true,
         ".\\build\\preprocessor_tests.exe": true,
         "ctest": true,
-        "&": true,
-        "ConvertFrom-Json": true,
         "/^python benchmarks\\\\visualize\\.py benchmarks\\\\results\\\\benchmark_data\\.json benchmarks\\\\results 2>&1$/": {
             "approve": true,
             "matchCommandLine": true

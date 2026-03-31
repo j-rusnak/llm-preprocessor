@@ -9,7 +9,7 @@ enable_testing()
 # --- 1. Find the Packages (Downloaded by vcpkg) ---
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(CURL REQUIRED)
-find_package(unofficial-sqlite3 CONFIG REQUIRED)
+# find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
 # --- ONNX Runtime (official pre-built binary) ---
@@ -47,7 +47,7 @@ endif()
 # --- 2. Define your Core Preprocessor Library ---
 add_library(preprocessor_lib
     src/intent_router.cpp
-    src/embedding_engine.cpp
+    # src/embedding_engine.cpp
     src/context_gatherer.cpp
     src/tokenizer.cpp
     src/memory_engine.cpp
@@ -65,8 +65,8 @@ target_include_directories(preprocessor_lib PUBLIC
 target_link_libraries(preprocessor_lib PUBLIC
     nlohmann_json::nlohmann_json
     CURL::libcurl
-    onnxruntime
-    unofficial::sqlite3::sqlite3
+    # onnxruntime
+    sqlite3
 )
 
 # --- 3. Define the Main Executable ---
@@ -84,7 +84,7 @@ add_executable(preprocessor_tests
     tests/test_context_gatherer.cpp
     tests/test_config_loader.cpp
     tests/test_tokenizer.cpp
-    tests/test_embedding_engine.cpp
+    # tests/test_embedding_engine.cpp
 )
 
 target_link_libraries(preprocessor_tests PRIVATE

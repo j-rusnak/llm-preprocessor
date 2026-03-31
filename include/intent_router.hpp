@@ -6,9 +6,9 @@
 #include <optional>
 #include <functional>
 
-namespace preprocessor {
+#include "i_embedding_engine.hpp"
 
-class EmbeddingEngine;
+namespace preprocessor {
 
 struct Intent {
     std::string name;
@@ -28,7 +28,7 @@ class IntentRouter {
 public:
     using ActionCallback = std::function<void(const RouteResult&, const std::string& /* user_input */)>;
 
-    IntentRouter(float similarity_threshold, std::shared_ptr<EmbeddingEngine> engine);
+    IntentRouter(float similarity_threshold, std::shared_ptr<IEmbeddingEngine> engine);
 
     void add_intent(const std::string& name, const std::string& representative_text);
     void remove_intent(const std::string& name);
@@ -42,7 +42,7 @@ private:
     static float cosine_similarity(const std::vector<float>& a, const std::vector<float>& b);
 
     float threshold_;
-    std::shared_ptr<EmbeddingEngine> engine_;
+    std::shared_ptr<IEmbeddingEngine> engine_;
     std::vector<Intent> intents_;
     ActionCallback action_callback_;
 };

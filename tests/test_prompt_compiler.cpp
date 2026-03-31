@@ -117,3 +117,27 @@ TEST(PromptCompilerTest, BuildPayloadJsonDefaultsToMessagesOnly) {
     EXPECT_TRUE(j.contains("messages"));
     EXPECT_FALSE(j.contains("model"));
 }
+
+TEST(PromptCompilerTest, BuildPayloadJsonThrowsWhenTemperatureWithoutModel) {
+    preprocessor::PromptCompiler compiler("sys");
+    std::vector<std::pair<std::string, std::string>> history;
+
+    preprocessor::ApiParams params;
+    params.temperature = 0.7f;  // no model set
+
+    EXPECT_THROW(
+        compiler.build_payload_json("hello", "", history, params),
+        std::invalid_argument);
+}
+
+TEST(PromptCompilerTest, BuildPayloadJsonThrowsWhenMaxTokensWithoutModel) {
+    preprocessor::PromptCompiler compiler("sys");
+    std::vector<std::pair<std::string, std::string>> history;
+
+    preprocessor::ApiParams params;
+    params.max_tokens = 512;  // no model set
+
+    EXPECT_THROW(
+        compiler.build_payload_json("hello", "", history, params),
+        std::invalid_argument);
+}

@@ -15,7 +15,10 @@
 
 #include <curl/curl.h>
 
-static constexpr const char* VERSION = "1.0.0";
+#ifndef PREPROCESSOR_VERSION
+#define PREPROCESSOR_VERSION "unknown"
+#endif
+static constexpr const char* VERSION = PREPROCESSOR_VERSION;
 
 static void print_help() {
     std::cout << "Usage: preprocessor_app [OPTIONS] [config_path]\n\n"
@@ -133,13 +136,11 @@ int main(int argc, char* argv[]) {
             auto history = memory.get_recent_history(config.history_limit);
 
             if (use_api_payload) {
-                auto payload = compiler.build_payload_json(user_input, retrieved_context, history, api_params);
-                // Display clean version for terminal.
+                // Build display version (no history) for terminal output.
                 std::vector<std::pair<std::string, std::string>> empty_history;
                 auto display = compiler.build_payload_json(user_input, retrieved_context, empty_history, api_params);
                 std::cout << "\n=== LLM Payload ===\n" << display.dump(4) << "\n";
             } else {
-                std::string payload = compiler.build_payload(user_input, retrieved_context, history);
                 std::vector<std::pair<std::string, std::string>> empty_history;
                 std::string display_payload = compiler.build_payload(user_input, retrieved_context, empty_history);
                 std::cout << "\n=== LLM Payload ===\n" << display_payload << "\n";
