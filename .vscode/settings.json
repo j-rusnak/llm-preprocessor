@@ -1,6 +1,11 @@
 {
-    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.errorSquiggles": "disabled",
     "cmake.configureSettings": {
-        "CMAKE_TOOLCHAIN_FILE": "${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        "CMAKE_TOOLCHAIN_FILE": "C:/Users/joeyr/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    },
+    "chat.tools.terminal.autoApprove": {
+        ".\\build\\preprocessor_app.exe": true,
+        ".\\build\\preprocessor_tests.exe": true,
+        "ctest": true
     }
 }

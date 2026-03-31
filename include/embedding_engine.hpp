@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <onnxruntime_cxx_api.h>
+#include <onnxruntime_session_options_config_keys.h>
 
 namespace preprocessor {
 
