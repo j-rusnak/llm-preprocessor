@@ -1,5 +1,5 @@
 #include "intent_router.hpp"
-#include "embedding_engine.hpp"
+#include "i_embedding_engine.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -42,7 +42,7 @@ static std::vector<std::string> remove_stop_words(const std::vector<std::string>
     return filtered;
 }
 
-IntentRouter::IntentRouter(float similarity_threshold, std::shared_ptr<EmbeddingEngine> engine)
+IntentRouter::IntentRouter(float similarity_threshold, std::shared_ptr<IEmbeddingEngine> engine)
     : threshold_(similarity_threshold), engine_(std::move(engine)) {
     if (threshold_ < 0.0f || threshold_ > 1.0f) {
         throw std::invalid_argument("Similarity threshold must be between 0.0 and 1.0");

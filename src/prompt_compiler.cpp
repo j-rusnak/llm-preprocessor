@@ -1,5 +1,7 @@
 #include "prompt_compiler.hpp"
 
+#include <stdexcept>
+
 namespace preprocessor {
 
 PromptCompiler::PromptCompiler(const std::string& system_prompt)
@@ -62,6 +64,14 @@ nlohmann::json PromptCompiler::build_payload_json(
 
     nlohmann::json payload;
     payload["messages"] = messages;
+
+    if (api_params.temperature.has_value() || api_params.max_tokens.has_value()) {
+        if (!api_params.model.has_value()) {
+            throw std::invalid_argument(
+                "build_payload_json: api_params.model must be set when "
+                "temperature or max_tokens are provided");
+        }
+    }
 
     if (api_params.model.has_value()) {
         payload["model"] = *api_params.model;

@@ -141,6 +141,11 @@ void MemoryEngine::update_last_message(const std::string& content) {
         throw std::runtime_error(
             std::string("Failed to update last message: ") + sqlite3_errmsg(db_));
     }
+
+    if (sqlite3_changes(db_) == 0) {
+        throw std::runtime_error(
+            "Failed to update last message: no existing messages to update.");
+    }
 }
 
 void MemoryEngine::clear_history() {
@@ -156,6 +161,10 @@ void MemoryEngine::clear_history() {
 }
 
 void MemoryEngine::prune(int max_rows) {
+    if (max_rows < 1) {
+        throw std::invalid_argument("prune: max_rows must be >= 1");
+    }
+
     const char* sql =
         "DELETE FROM messages WHERE id NOT IN "
         "(SELECT id FROM messages ORDER BY id DESC LIMIT ?);";
