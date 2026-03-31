@@ -71,3 +71,49 @@ TEST(PromptCompilerTest, OutputIsValidJson) {
     // Should not throw — valid JSON.
     EXPECT_NO_THROW((void)nlohmann::json::parse(payload));
 }
+
+TEST(PromptCompilerTest, BuildPayloadJsonReturnsObject) {
+    preprocessor::PromptCompiler compiler("sys");
+    std::vector<std::pair<std::string, std::string>> history;
+
+    auto j = compiler.build_payload_json("hello", "", history);
+    ASSERT_TRUE(j.is_object());
+    ASSERT_TRUE(j.contains("messages"));
+    EXPECT_TRUE(j["messages"].is_array());
+    EXPECT_EQ(j["messages"].size(), 2u); // system + user
+    // No API params set — should not have model/temperature/max_tokens.
+    EXPECT_FALSE(j.contains("model"));
+    EXPECT_FALSE(j.contains("temperature"));
+    EXPECT_FALSE(j.contains("max_tokens"));
+}
+
+TEST(PromptCompilerTest, BuildPayloadJsonWithApiParams) {
+    preprocessor::PromptCompiler compiler("sys");
+    std::vector<std::pair<std::string, std::string>> history = {
+        {"user", "hi"}, {"assistant", "hello"}
+    };
+
+    preprocessor::ApiParams params;
+    params.model = "gpt-4";
+    params.temperature = 0.7f;
+    params.max_tokens = 1024;
+
+    auto j = compiler.build_payload_json("what is 2+2?", "math context", history, params);
+
+    ASSERT_TRUE(j.is_object());
+    EXPECT_EQ(j["model"], "gpt-4");
+    EXPECT_FLOAT_EQ(j["temperature"].get<float>(), 0.7f);
+    EXPECT_EQ(j["max_tokens"], 1024);
+    EXPECT_EQ(j["messages"].size(), 4u); // system + 2 history + user
+}
+
+TEST(PromptCompilerTest, BuildPayloadJsonDefaultsToMessagesOnly) {
+    preprocessor::PromptCompiler compiler("sys");
+    std::vector<std::pair<std::string, std::string>> history;
+    preprocessor::ApiParams empty_params;
+
+    auto j = compiler.build_payload_json("hello", "", history, empty_params);
+    // Even with explicit empty ApiParams, should only have "messages".
+    EXPECT_TRUE(j.contains("messages"));
+    EXPECT_FALSE(j.contains("model"));
+}

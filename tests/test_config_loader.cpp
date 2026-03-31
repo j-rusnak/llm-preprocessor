@@ -27,7 +27,7 @@ TEST_F(ConfigLoaderTest, LoadsDefaults) {
     EXPECT_EQ(config.model_path, "models/model.onnx");
     EXPECT_EQ(config.vocab_path, "models/vocab.txt");
     EXPECT_EQ(config.db_path, "history.db");
-    EXPECT_FLOAT_EQ(config.similarity_threshold, 0.75f);
+    EXPECT_FLOAT_EQ(config.similarity_threshold, 0.65f);
     EXPECT_EQ(config.history_limit, 10);
     EXPECT_TRUE(config.intents.empty());
 }
@@ -112,5 +112,59 @@ TEST_F(ConfigLoaderTest, RejectsIntentWithNoExamples) {
 
 TEST_F(ConfigLoaderTest, RejectsIntentWithoutExampleOrExamples) {
     write_config(R"({"intents": [{"name": "NOEX"}]})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsEmptyModelPath) {
+    write_config(R"({"model_path": ""})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsEmptyVocabPath) {
+    write_config(R"({"vocab_path": ""})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsEmptyDbPath) {
+    write_config(R"({"db_path": ""})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, LoadsOptionalApiParams) {
+    write_config(R"({
+        "api_model": "gpt-4",
+        "api_endpoint": "https://api.openai.com/v1/chat/completions",
+        "temperature": 0.7,
+        "max_tokens": 2048
+    })");
+    auto config = preprocessor::ConfigLoader::load(temp_path_);
+
+    ASSERT_TRUE(config.api_model.has_value());
+    EXPECT_EQ(*config.api_model, "gpt-4");
+    ASSERT_TRUE(config.api_endpoint.has_value());
+    EXPECT_EQ(*config.api_endpoint, "https://api.openai.com/v1/chat/completions");
+    ASSERT_TRUE(config.temperature.has_value());
+    EXPECT_FLOAT_EQ(*config.temperature, 0.7f);
+    ASSERT_TRUE(config.max_tokens.has_value());
+    EXPECT_EQ(*config.max_tokens, 2048);
+}
+
+TEST_F(ConfigLoaderTest, ApiParamsAbsentByDefault) {
+    write_config("{}");
+    auto config = preprocessor::ConfigLoader::load(temp_path_);
+
+    EXPECT_FALSE(config.api_model.has_value());
+    EXPECT_FALSE(config.api_endpoint.has_value());
+    EXPECT_FALSE(config.temperature.has_value());
+    EXPECT_FALSE(config.max_tokens.has_value());
+}
+
+TEST_F(ConfigLoaderTest, RejectsInvalidTemperature) {
+    write_config(R"({"temperature": 3.0})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsInvalidMaxTokens) {
+    write_config(R"({"max_tokens": 0})");
     EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
 }

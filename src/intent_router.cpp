@@ -19,8 +19,8 @@ static const std::unordered_set<std::string>& stop_words() {
         "she", "her", "it", "its", "they", "them", "their", "that", "this",
         "these", "those", "who", "whom", "which", "what", "where", "when",
         "how", "why", "if", "then", "so", "but", "and", "or", "not", "no",
-        "to", "of", "in", "on", "at", "by", "for", "with", "from", "up",
-        "out", "about", "into", "over", "after", "before",
+        "to", "of", "in", "on", "at", "by", "for", "with", "from",
+        "about", "into", "over", "after", "before",
         "can", "could", "will", "would", "shall", "should", "may", "might",
         "must", "just", "also", "very", "really", "too", "quite",
         "hey", "hi", "hello", "yo", "oh", "ok", "okay", "please", "thanks",
@@ -60,13 +60,44 @@ void IntentRouter::add_intent(const std::string& name, const std::string& repres
     intents_.push_back({name, std::move(embedding)});
 }
 
-std::optional<std::string> IntentRouter::route(const std::string& user_input) const {
+void IntentRouter::remove_intent(const std::string& name) {
+    intents_.erase(
+        std::remove_if(intents_.begin(), intents_.end(),
+            [&name](const Intent& i) { return i.name == name; }),
+        intents_.end());
+}
+
+void IntentRouter::clear_intents() {
+    intents_.clear();
+}
+
+void IntentRouter::on_action(ActionCallback callback) {
+    action_callback_ = std::move(callback);
+}
+
+std::optional<RouteResult> IntentRouter::route(const std::string& user_input) const {
     if (intents_.empty()) {
         return std::nullopt;
     }
 
+    // Cap on total ONNX inference calls in a single route() invocation.
+    static constexpr int max_inferences = 15;
+    int inference_count = 0;
+
+    auto make_result = [&](const Intent* best, float score) -> std::optional<RouteResult> {
+        if (best && score >= threshold_) {
+            RouteResult result{best->name, score};
+            if (action_callback_) {
+                action_callback_(result, user_input);
+            }
+            return result;
+        }
+        return std::nullopt;
+    };
+
     // --- Fast path: try the full input first. ---
     std::vector<float> input_embedding = engine_->generate_embedding(user_input);
+    ++inference_count;
 
     float best_score = -1.0f;
     const Intent* best_intent = nullptr;
@@ -80,12 +111,18 @@ std::optional<std::string> IntentRouter::route(const std::string& user_input) co
     }
 
     if (best_intent && best_score >= threshold_) {
-        return best_intent->name;
+        return make_result(best_intent, best_score);
+    }
+
+    // --- Early exit: if the full input scores very low against all intents,
+    //     subphrase matching is unlikely to help. Skip the expensive sliding
+    //     window to avoid 8-10x latency for clearly non-matching inputs. ---
+    static constexpr float early_exit_ceiling = 0.35f;
+    if (best_score < early_exit_ceiling) {
+        return std::nullopt;
     }
 
     // --- Sliding-window subphrase matching. ---
-    // When the full sentence doesn't match (noise words dilute the embedding),
-    // first try the input with stop words removed, then extract sliding windows.
     std::vector<std::string> words;
     {
         std::istringstream iss(user_input);
@@ -97,7 +134,8 @@ std::optional<std::string> IntentRouter::route(const std::string& user_input) co
 
     // Try the stop-word-filtered phrase first — often sufficient.
     auto content_words = remove_stop_words(words);
-    if (!content_words.empty() && content_words.size() < words.size()) {
+    if (!content_words.empty() && content_words.size() < words.size() &&
+        inference_count < max_inferences) {
         std::string filtered_phrase;
         for (const auto& w : content_words) {
             if (!filtered_phrase.empty()) filtered_phrase += ' ';
@@ -105,6 +143,7 @@ std::optional<std::string> IntentRouter::route(const std::string& user_input) co
         }
 
         auto emb = engine_->generate_embedding(filtered_phrase);
+        ++inference_count;
         for (const auto& intent : intents_) {
             float score = cosine_similarity(emb, intent.embedding);
             if (score > best_score) {
@@ -113,7 +152,7 @@ std::optional<std::string> IntentRouter::route(const std::string& user_input) co
             }
         }
         if (best_score >= threshold_) {
-            return best_intent->name;
+            return make_result(best_intent, best_score);
         }
     }
 
@@ -122,12 +161,11 @@ std::optional<std::string> IntentRouter::route(const std::string& user_input) co
         return std::nullopt;
     }
 
-    // Try windows from largest to smallest — larger subphrases carry more
-    // context and produce fewer false positives, so prefer them first.
+    // Try windows from largest to smallest.
     const size_t max_window = std::min<size_t>(5, words.size() - 1);
 
-    for (size_t window_size = max_window; window_size >= 1; --window_size) {
-        for (size_t start = 0; start + window_size <= words.size(); ++start) {
+    for (size_t window_size = max_window; window_size >= 1 && inference_count < max_inferences; --window_size) {
+        for (size_t start = 0; start + window_size <= words.size() && inference_count < max_inferences; ++start) {
             std::string phrase;
             for (size_t i = start; i < start + window_size; ++i) {
                 if (!phrase.empty()) phrase += ' ';
@@ -135,6 +173,7 @@ std::optional<std::string> IntentRouter::route(const std::string& user_input) co
             }
 
             auto emb = engine_->generate_embedding(phrase);
+            ++inference_count;
             for (const auto& intent : intents_) {
                 float score = cosine_similarity(emb, intent.embedding);
                 if (score > best_score) {
@@ -143,9 +182,8 @@ std::optional<std::string> IntentRouter::route(const std::string& user_input) co
                 }
             }
 
-            // Early exit once a subphrase crosses the threshold.
             if (best_score >= threshold_) {
-                return best_intent->name;
+                return make_result(best_intent, best_score);
             }
         }
     }

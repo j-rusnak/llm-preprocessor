@@ -7,7 +7,6 @@ namespace preprocessor {
 
 class ContextGatherer {
 public:
-    static std::string read_file(const std::string& filepath);
     static std::string fetch_url(const std::string& url);
     static std::vector<std::string> extract_urls(const std::string& text);
 

@@ -93,3 +93,29 @@ target_link_libraries(preprocessor_tests PRIVATE
 )
 
 gtest_add_tests(TARGET preprocessor_tests)
+
+# --- 5. Benchmark executable ---
+add_executable(benchmark_runner benchmarks/benchmark_runner.cpp)
+target_link_libraries(benchmark_runner PRIVATE preprocessor_lib)
+
+# --- 6. Install targets ---
+include(GNUInstallDirs)
+
+install(TARGETS preprocessor_lib
+    EXPORT LLMPreprocessorTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(TARGETS preprocessor_app
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(EXPORT LLMPreprocessorTargets
+    FILE LLMPreprocessorTargets.cmake
+    NAMESPACE LLMPreprocessor::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LLMPreprocessor
+)

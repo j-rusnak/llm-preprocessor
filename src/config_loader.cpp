@@ -26,14 +26,46 @@ Config ConfigLoader::load(const std::string& filepath) {
     config.vocab_path = j.value("vocab_path", "models/vocab.txt");
     config.db_path = j.value("db_path", "history.db");
     config.system_prompt = j.value("system_prompt", "You are a helpful AI assistant.");
-    config.similarity_threshold = j.value("similarity_threshold", 0.75f);
+    config.similarity_threshold = j.value("similarity_threshold", 0.65f);
     config.history_limit = j.value("history_limit", 10);
+
+    if (config.model_path.empty()) {
+        throw std::invalid_argument("model_path must not be empty");
+    }
+    if (config.vocab_path.empty()) {
+        throw std::invalid_argument("vocab_path must not be empty");
+    }
+    if (config.db_path.empty()) {
+        throw std::invalid_argument("db_path must not be empty");
+    }
 
     if (config.similarity_threshold < 0.0f || config.similarity_threshold > 1.0f) {
         throw std::invalid_argument("similarity_threshold must be between 0.0 and 1.0");
     }
     if (config.history_limit < 1) {
         throw std::invalid_argument("history_limit must be at least 1");
+    }
+
+    // Optional API parameters (for complete payload mode).
+    if (j.contains("api_model") && j["api_model"].is_string()) {
+        config.api_model = j["api_model"].get<std::string>();
+    }
+    if (j.contains("api_endpoint") && j["api_endpoint"].is_string()) {
+        config.api_endpoint = j["api_endpoint"].get<std::string>();
+    }
+    if (j.contains("temperature") && j["temperature"].is_number()) {
+        float t = j["temperature"].get<float>();
+        if (t < 0.0f || t > 2.0f) {
+            throw std::invalid_argument("temperature must be between 0.0 and 2.0");
+        }
+        config.temperature = t;
+    }
+    if (j.contains("max_tokens") && j["max_tokens"].is_number_integer()) {
+        int mt = j["max_tokens"].get<int>();
+        if (mt < 1) {
+            throw std::invalid_argument("max_tokens must be at least 1");
+        }
+        config.max_tokens = mt;
     }
 
     if (j.contains("intents") && j["intents"].is_array()) {
