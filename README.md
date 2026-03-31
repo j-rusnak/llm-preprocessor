@@ -31,11 +31,11 @@ TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
 |---|---|---|
 | **ConfigLoader** | `config_loader.hpp` | Loads and validates JSON configuration (model paths, thresholds, intents). |
 | **TextSanitizer** | `text_sanitizer.hpp` | Normalizes input — lowercases, collapses whitespace, trims. |
-| **Tokenizer** | `tokenizer.hpp` | WordPiece tokenizer compatible with BERT-based models. Loads a `vocab.txt` file and produces token ID sequences. |
-| **EmbeddingEngine** | `embedding_engine.hpp` | Generates vector embeddings from text via ONNX Runtime inference. Supports `.onnx` and `.ort` model formats with mean pooling over token outputs. |
+| **Tokenizer** | `tokenizer.hpp` | WordPiece tokenizer compatible with BERT-based models. Dynamically resolves `[CLS]`/`[SEP]`/`[UNK]` IDs from the vocabulary and truncates at 512 tokens. |
+| **EmbeddingEngine** | `embedding_engine.hpp` | Generates vector embeddings from text via ONNX Runtime inference. Supports `.onnx` and `.ort` model formats with attention-mask-aware mean pooling. |
 | **IntentRouter** | `intent_router.hpp` | Compares input embeddings against registered intents using cosine similarity. Returns a local action name if the similarity exceeds a configurable threshold. |
-| **ContextGatherer** | `context_gatherer.hpp` | Fetches external context from URLs (`libcurl`) and extracts URLs from user input. Restricted to HTTP/HTTPS with a 10 MB download limit. |
-| **MemoryEngine** | `memory_engine.hpp` | SQLite-backed conversation history. Stores and retrieves recent message pairs for multi-turn context. |
+| **ContextGatherer** | `context_gatherer.hpp` | Fetches external context from URLs (`libcurl`, RAII-wrapped handles) and extracts URLs from user input. Restricted to HTTP/HTTPS with a 10 MB download limit. |
+| **MemoryEngine** | `memory_engine.hpp` | SQLite-backed conversation history. Stores and retrieves recent message pairs for multi-turn context. Supports move semantics. |
 | **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final JSON payload (system prompt + history + context-enriched user message) ready to send to any LLM API. |
 
 ## Tech Stack
@@ -46,7 +46,7 @@ TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
 - **libcurl** — HTTP fetching
 - **SQLite3** — conversation memory
 - **nlohmann/json** — JSON construction
-- **Google Test** — unit testing (32 tests across 6 suites)
+- **Google Test** — unit testing (51 tests across 8 suites)
 
 ## Project Structure
 
@@ -76,10 +76,12 @@ TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
 ├── tests/
 │   ├── test_config_loader.cpp
 │   ├── test_context_gatherer.cpp
+│   ├── test_embedding_engine.cpp
 │   ├── test_intent_router.cpp
 │   ├── test_memory_engine.cpp
 │   ├── test_prompt_compiler.cpp
-│   └── test_text_sanitizer.cpp
+│   ├── test_text_sanitizer.cpp
+│   └── test_tokenizer.cpp
 ├── models/
 │   ├── model.onnx / model.ort  (ONNX embedding model)
 │   └── vocab.txt               (WordPiece vocabulary)
@@ -88,10 +90,10 @@ TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
 
 ## Prerequisites
 
-- A C++17 compiler (MSVC recommended on Windows)
+- A C++17 compiler (MSVC on Windows, GCC/Clang on Linux/macOS)
 - [CMake 3.15+](https://cmake.org/)
 - [vcpkg](https://vcpkg.io/) — package manager
-- **ONNX Runtime 1.23.2** — download the [official pre-built release](https://github.com/microsoft/onnxruntime/releases/tag/v1.23.2) and extract it to the project root as `onnxruntime-win-x64-1.23.2/`
+- **ONNX Runtime 1.23.2** — download the [official pre-built release](https://github.com/microsoft/onnxruntime/releases/tag/v1.23.2) and extract it to the project root (CMake auto-selects the platform-appropriate directory name)
 - A **BERT-based ONNX embedding model** (e.g., `all-MiniLM-L6-v2`)
 
 ## Setting Up the Model
@@ -141,13 +143,16 @@ cd build
 ctest --output-on-failure
 ```
 
-All 32 tests across 6 suites should pass:
+All 51 tests across 8 suites should pass:
+
 - **TextSanitizerTest** (5) — whitespace, case normalization
 - **IntentRouterTest** (5) — cosine similarity edge cases
-- **MemoryEngineTest** (5) — SQLite CRUD, ordering, limits
+- **MemoryEngineTest** (7) — SQLite CRUD, ordering, limits, move semantics
 - **PromptCompilerTest** (4) — JSON payload construction
 - **UrlExtractionTest** (6) — URL parsing from text
 - **ConfigLoaderTest** (7) — config validation and defaults
+- **TokenizerTest** (12) — WordPiece encoding, special tokens, truncation, subwords
+- **EmbeddingEngineTest** (2 + 3 integration) — construction validation, embedding shape/normalization/similarity
 
 ## Configuration
 
