@@ -41,9 +41,12 @@ int main(int argc, char* argv[]) {
             auto engine = std::make_shared<preprocessor::EmbeddingEngine>(config.model_path, tokenizer);
             router = std::make_unique<preprocessor::IntentRouter>(config.similarity_threshold, engine);
 
-            for (const auto& [name, example] : config.intents) {
-                router->add_intent(name, example);
-                std::cout << "  Registered intent: " << name << "\n";
+            for (const auto& [name, examples] : config.intents) {
+                for (const auto& example : examples) {
+                    router->add_intent(name, example);
+                }
+                std::cout << "  Registered intent: " << name
+                          << " (" << examples.size() << " examples)\n";
             }
             routing_enabled = true;
         } else {
@@ -98,7 +101,14 @@ int main(int argc, char* argv[]) {
             auto history = memory.get_recent_history(config.history_limit);
             std::string payload = compiler.build_payload(user_input, retrieved_context, history);
 
-            std::cout << "\n=== LLM Payload ===\n" << payload << "\n\n";
+            // Display a clean version without history to avoid cluttering the terminal.
+            std::vector<std::pair<std::string, std::string>> empty_history;
+            std::string display_payload = compiler.build_payload(user_input, retrieved_context, empty_history);
+            std::cout << "\n=== LLM Payload ===\n" << display_payload << "\n";
+            if (!history.empty()) {
+                std::cout << "(+ " << history.size() << " history messages included in payload)\n";
+            }
+            std::cout << "\n";
 
             // Record this exchange.
             memory.add_message("user", user_input);

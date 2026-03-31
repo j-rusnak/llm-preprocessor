@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "embedding_engine.hpp"
+#include "intent_router.hpp"
 #include "tokenizer.hpp"
 
 #include <filesystem>
@@ -88,4 +89,156 @@ TEST_F(EmbeddingEngineIntegrationTest, SimilarInputsProduceHighSimilarity) {
 
     float dot = std::inner_product(emb1.begin(), emb1.end(), emb2.begin(), 0.0f);
     EXPECT_GT(dot, 0.75f); // Semantically similar
+}
+
+// Integration tests for multi-example intent routing.
+TEST_F(EmbeddingEngineIntegrationTest, MultiExampleMuteMatches) {
+    if (!model_available()) {
+        GTEST_SKIP() << "Model files not found — skipping integration test";
+    }
+
+    auto tok = std::make_shared<preprocessor::Tokenizer>("models/vocab.txt");
+    auto engine = std::make_shared<preprocessor::EmbeddingEngine>("models/model.ort", tok);
+    preprocessor::IntentRouter router(0.65f, engine);
+
+    // Register multiple examples for mute
+    router.add_intent("ACTION_MUTE", "mute the sound");
+    router.add_intent("ACTION_MUTE", "silence the audio");
+    router.add_intent("ACTION_MUTE", "please mute");
+    router.add_intent("ACTION_MUTE", "turn off the sound");
+
+    auto result = router.route("please mute");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "ACTION_MUTE");
+}
+
+TEST_F(EmbeddingEngineIntegrationTest, MultiExampleVolumeDownMatches) {
+    if (!model_available()) {
+        GTEST_SKIP() << "Model files not found — skipping integration test";
+    }
+
+    auto tok = std::make_shared<preprocessor::Tokenizer>("models/vocab.txt");
+    auto engine = std::make_shared<preprocessor::EmbeddingEngine>("models/model.ort", tok);
+    preprocessor::IntentRouter router(0.65f, engine);
+
+    router.add_intent("ACTION_DECREASE_VOLUME", "turn down the volume");
+    router.add_intent("ACTION_DECREASE_VOLUME", "lower the volume");
+    router.add_intent("ACTION_DECREASE_VOLUME", "make it quieter");
+    router.add_intent("ACTION_DECREASE_VOLUME", "reduce the volume please");
+
+    auto result = router.route("turn the volume down please");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "ACTION_DECREASE_VOLUME");
+}
+
+TEST_F(EmbeddingEngineIntegrationTest, MultiExampleDoesNotFalseMatch) {
+    if (!model_available()) {
+        GTEST_SKIP() << "Model files not found — skipping integration test";
+    }
+
+    auto tok = std::make_shared<preprocessor::Tokenizer>("models/vocab.txt");
+    auto engine = std::make_shared<preprocessor::EmbeddingEngine>("models/model.ort", tok);
+    preprocessor::IntentRouter router(0.75f, engine);
+
+    router.add_intent("ACTION_MUTE", "mute the sound");
+    router.add_intent("ACTION_MUTE", "silence the audio");
+
+    // Unrelated input should not match
+    auto result = router.route("what is the weather forecast for tomorrow");
+    EXPECT_FALSE(result.has_value());
+}
+
+// Sliding-window subphrase routing tests.
+TEST_F(EmbeddingEngineIntegrationTest, NoisyMuteInputMatchesViaSubphrase) {
+    if (!model_available()) {
+        GTEST_SKIP() << "Model files not found — skipping integration test";
+    }
+
+    auto tok = std::make_shared<preprocessor::Tokenizer>("models/vocab.txt");
+    auto engine = std::make_shared<preprocessor::EmbeddingEngine>("models/model.ort", tok);
+    preprocessor::IntentRouter router(0.75f, engine);
+
+    router.add_intent("ACTION_MUTE", "mute the sound");
+    router.add_intent("ACTION_MUTE", "silence the audio");
+    router.add_intent("ACTION_MUTE", "please mute");
+    router.add_intent("ACTION_MUTE", "turn off the sound");
+
+    auto result = router.route("yo bro can you mute that");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "ACTION_MUTE");
+}
+
+TEST_F(EmbeddingEngineIntegrationTest, NoisyVolumeDownMatchesViaSubphrase) {
+    if (!model_available()) {
+        GTEST_SKIP() << "Model files not found — skipping integration test";
+    }
+
+    auto tok = std::make_shared<preprocessor::Tokenizer>("models/vocab.txt");
+    auto engine = std::make_shared<preprocessor::EmbeddingEngine>("models/model.ort", tok);
+    preprocessor::IntentRouter router(0.65f, engine);
+
+    router.add_intent("ACTION_DECREASE_VOLUME", "turn down the volume");
+    router.add_intent("ACTION_DECREASE_VOLUME", "lower the volume");
+    router.add_intent("ACTION_DECREASE_VOLUME", "make it quieter");
+    router.add_intent("ACTION_DECREASE_VOLUME", "reduce the volume please");
+
+    auto result = router.route("hey computer turn the volume down please");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "ACTION_DECREASE_VOLUME");
+}
+
+TEST_F(EmbeddingEngineIntegrationTest, SubphraseDoesNotFalseMatch) {
+    if (!model_available()) {
+        GTEST_SKIP() << "Model files not found — skipping integration test";
+    }
+
+    auto tok = std::make_shared<preprocessor::Tokenizer>("models/vocab.txt");
+    auto engine = std::make_shared<preprocessor::EmbeddingEngine>("models/model.ort", tok);
+    preprocessor::IntentRouter router(0.75f, engine);
+
+    router.add_intent("ACTION_MUTE", "mute the sound");
+    router.add_intent("ACTION_OPEN_BROWSER", "open the web browser");
+
+    // Long unrelated input — no subphrase should match
+    auto result = router.route("hey dude what do you think about the economy these days");
+    EXPECT_FALSE(result.has_value());
+}
+
+// Stop-word filtering tests.
+TEST_F(EmbeddingEngineIntegrationTest, StopWordFilteredVolumeDown) {
+    if (!model_available()) {
+        GTEST_SKIP() << "Model files not found — skipping integration test";
+    }
+
+    auto tok = std::make_shared<preprocessor::Tokenizer>("models/vocab.txt");
+    auto engine = std::make_shared<preprocessor::EmbeddingEngine>("models/model.ort", tok);
+    preprocessor::IntentRouter router(0.65f, engine);
+
+    router.add_intent("ACTION_DECREASE_VOLUME", "turn down the volume");
+    router.add_intent("ACTION_DECREASE_VOLUME", "lower the volume");
+    router.add_intent("ACTION_DECREASE_VOLUME", "make it quieter");
+    router.add_intent("ACTION_DECREASE_VOLUME", "reduce the volume please");
+
+    // After stop-word removal: "turn volume down" — matches "turn down the volume"
+    auto result = router.route("could you turn the volume down for me");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "ACTION_DECREASE_VOLUME");
+}
+
+TEST_F(EmbeddingEngineIntegrationTest, StopWordFilteredMute) {
+    if (!model_available()) {
+        GTEST_SKIP() << "Model files not found — skipping integration test";
+    }
+
+    auto tok = std::make_shared<preprocessor::Tokenizer>("models/vocab.txt");
+    auto engine = std::make_shared<preprocessor::EmbeddingEngine>("models/model.ort", tok);
+    preprocessor::IntentRouter router(0.75f, engine);
+
+    router.add_intent("ACTION_MUTE", "mute the sound");
+    router.add_intent("ACTION_MUTE", "silence the audio");
+
+    // After stop-word removal: "mute thing"
+    auto result = router.route("could you please mute that thing");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "ACTION_MUTE");
 }

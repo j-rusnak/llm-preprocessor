@@ -33,5 +33,7 @@ Adhere strictly to this flat structure. Do NOT create nested subdirectories insi
 # Workflow Instructions for the AI
 - When asked to create a new feature, ALWAYS generate the `.hpp` interface file first, followed by the `.cpp` implementation file.
 - Remind the user to add the newly created `.cpp` file to the `CMakeLists.txt` if you generate a new file.
+- ALWAYS write or update unit tests for every new feature and any behavior changes. Place tests in the `tests/` directory and keep them aligned with the production code changes.
+- If a change is significant (new feature, changed behavior, build/setup changes, or architecture-impacting updates), ALWAYS update `README.md` to reflect the new reality.
 - Keep `main.cpp` as clean as possible. It should only instantiate classes from the `include/` directory and run the main application loop.
 - Prioritize low-latency execution. The preprocessor must be faster than the LLM it sits in front of.

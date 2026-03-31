@@ -33,7 +33,7 @@ TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
 | **TextSanitizer** | `text_sanitizer.hpp` | Normalizes input — lowercases, collapses whitespace, trims. |
 | **Tokenizer** | `tokenizer.hpp` | WordPiece tokenizer compatible with BERT-based models. Dynamically resolves `[CLS]`/`[SEP]`/`[UNK]` IDs from the vocabulary and truncates at 512 tokens. |
 | **EmbeddingEngine** | `embedding_engine.hpp` | Generates vector embeddings from text via ONNX Runtime inference. Supports `.onnx` and `.ort` model formats with attention-mask-aware mean pooling. |
-| **IntentRouter** | `intent_router.hpp` | Compares input embeddings against registered intents using cosine similarity. Returns a local action name if the similarity exceeds a configurable threshold. |
+| **IntentRouter** | `intent_router.hpp` | Compares input embeddings against registered intents using cosine similarity. Strips common stop words (pronouns, filler, connecting words) and uses sliding-window subphrase extraction to match commands embedded in longer sentences. Returns a local action name if the similarity exceeds a configurable threshold. |
 | **ContextGatherer** | `context_gatherer.hpp` | Fetches external context from URLs (`libcurl`, RAII-wrapped handles) and extracts URLs from user input. Restricted to HTTP/HTTPS with a 10 MB download limit. |
 | **MemoryEngine** | `memory_engine.hpp` | SQLite-backed conversation history. Stores and retrieves recent message pairs for multi-turn context. Supports move semantics. |
 | **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final JSON payload (system prompt + history + context-enriched user message) ready to send to any LLM API. |
@@ -46,7 +46,7 @@ TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
 - **libcurl** — HTTP fetching
 - **SQLite3** — conversation memory
 - **nlohmann/json** — JSON construction
-- **Google Test** — unit testing (51 tests across 8 suites)
+- **Google Test** — unit testing (63 tests across 8 suites)
 
 ## Project Structure
 
@@ -143,16 +143,16 @@ cd build
 ctest --output-on-failure
 ```
 
-All 51 tests across 8 suites should pass:
+All 63 tests across 8 suites should pass:
 
 - **TextSanitizerTest** (5) — whitespace, case normalization
 - **IntentRouterTest** (5) — cosine similarity edge cases
 - **MemoryEngineTest** (7) — SQLite CRUD, ordering, limits, move semantics
 - **PromptCompilerTest** (4) — JSON payload construction
 - **UrlExtractionTest** (6) — URL parsing from text
-- **ConfigLoaderTest** (7) — config validation and defaults
+- **ConfigLoaderTest** (11) — config validation, defaults, multi-example parsing, backward compat
 - **TokenizerTest** (12) — WordPiece encoding, special tokens, truncation, subwords
-- **EmbeddingEngineTest** (2 + 3 integration) — construction validation, embedding shape/normalization/similarity
+- **EmbeddingEngineTest** (2 + 11 integration) — construction validation, embedding shape/normalization/similarity, multi-example routing, sliding-window subphrase matching, stop-word filtering
 
 ## Configuration
 
@@ -167,11 +167,19 @@ The preprocessor is driven by a `config.json` file:
     "similarity_threshold": 0.75,
     "history_limit": 10,
     "intents": [
-        { "name": "ACTION_DECREASE_VOLUME", "example": "turn down the volume" },
-        { "name": "ACTION_OPEN_BROWSER",    "example": "open the web browser" }
+        {
+            "name": "ACTION_DECREASE_VOLUME",
+            "examples": ["turn down the volume", "lower the volume", "make it quieter"]
+        },
+        {
+            "name": "ACTION_OPEN_BROWSER",
+            "examples": ["open the web browser", "launch a browser", "start the browser"]
+        }
     ]
 }
 ```
+
+Each intent supports multiple synonym examples via the `"examples"` array. The router registers every example as a separate embedding — the best match across all examples determines the intent. A single `"example"` string is also accepted for backward compatibility.
 
 | Key | Description | Default |
 |---|---|---|
@@ -181,7 +189,7 @@ The preprocessor is driven by a `config.json` file:
 | `system_prompt` | System message prepended to every LLM payload | `"You are a helpful assistant."` |
 | `similarity_threshold` | Cosine similarity cutoff for intent matching (0.0–1.0) | `0.75` |
 | `history_limit` | Max conversation turns to include in payload | `10` |
-| `intents` | Array of `{name, example}` pairs for semantic routing | `[]` |
+| `intents` | Array of `{name, examples}` objects for semantic routing | `[]` |
 
 ## Running
 
@@ -211,6 +219,7 @@ LLM Preprocessor ready. Type your input (or 'quit' to exit).
 
 - Inputs matching a registered intent trigger a **local action** (no LLM call).
 - Unmatched inputs produce a **JSON payload** for the host application to forward to an LLM.
+- The terminal display shows a clean payload without conversation history to reduce clutter; the full history is still included when the payload is sent to the LLM.
 - URLs in the input are automatically fetched and injected as RAG context.
 - If model files are missing, semantic routing is gracefully disabled and only the payload path is active.
 
@@ -236,9 +245,11 @@ preprocessor::IntentRouter router(config.similarity_threshold, engine);
 preprocessor::MemoryEngine memory(config.db_path);
 preprocessor::PromptCompiler compiler(config.system_prompt);
 
-// Register intents
-for (const auto& [name, example] : config.intents) {
-    router.add_intent(name, example);
+// Register intents (multiple synonym examples per intent)
+for (const auto& [name, examples] : config.intents) {
+    for (const auto& example : examples) {
+        router.add_intent(name, example);
+    }
 }
 
 // Process input
