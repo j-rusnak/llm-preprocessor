@@ -91,3 +91,56 @@ TEST_F(MemoryEngineTest, MoveAssignmentTransfersOwnership) {
     ASSERT_EQ(history.size(), 1u);
     EXPECT_EQ(history[0].second, "original");
 }
+
+TEST_F(MemoryEngineTest, UpdateLastMessage) {
+    preprocessor::MemoryEngine engine(db_path_);
+    engine.add_message("user", "hello");
+    engine.add_message("assistant", "(placeholder)");
+
+    engine.update_last_message("real response");
+
+    auto history = engine.get_recent_history(10);
+    ASSERT_EQ(history.size(), 2u);
+    EXPECT_EQ(history[1].second, "real response");
+}
+
+TEST_F(MemoryEngineTest, ClearHistoryRemovesAll) {
+    preprocessor::MemoryEngine engine(db_path_);
+    engine.add_message("user", "msg1");
+    engine.add_message("assistant", "msg2");
+
+    engine.clear_history();
+    auto history = engine.get_recent_history(10);
+    EXPECT_TRUE(history.empty());
+}
+
+TEST_F(MemoryEngineTest, PruneKeepsRecentMessages) {
+    preprocessor::MemoryEngine engine(db_path_);
+    engine.add_message("user", "msg1");
+    engine.add_message("assistant", "msg2");
+    engine.add_message("user", "msg3");
+    engine.add_message("assistant", "msg4");
+    engine.add_message("user", "msg5");
+
+    engine.prune(3);
+    auto history = engine.get_recent_history(10);
+    ASSERT_EQ(history.size(), 3u);
+    EXPECT_EQ(history[0].second, "msg3");
+    EXPECT_EQ(history[1].second, "msg4");
+    EXPECT_EQ(history[2].second, "msg5");
+}
+
+TEST_F(MemoryEngineTest, UpdateLastMessageOnEmptyTableThrows) {
+    preprocessor::MemoryEngine engine(db_path_);
+    EXPECT_THROW(engine.update_last_message("content"), std::runtime_error);
+}
+
+TEST_F(MemoryEngineTest, PruneZeroRowsThrows) {
+    preprocessor::MemoryEngine engine(db_path_);
+    EXPECT_THROW(engine.prune(0), std::invalid_argument);
+}
+
+TEST_F(MemoryEngineTest, PruneNegativeRowsThrows) {
+    preprocessor::MemoryEngine engine(db_path_);
+    EXPECT_THROW(engine.prune(-5), std::invalid_argument);
+}

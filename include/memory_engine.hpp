@@ -19,6 +19,9 @@ public:
     MemoryEngine& operator=(MemoryEngine&& other) noexcept;
 
     void add_message(const std::string& role, const std::string& content);
+    void update_last_message(const std::string& content);
+    void clear_history();
+    void prune(int max_rows);
     std::vector<std::pair<std::string, std::string>> get_recent_history(int limit = 5);
 
 private:

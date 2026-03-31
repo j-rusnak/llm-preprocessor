@@ -7,6 +7,7 @@
 #include "text_sanitizer.hpp"
 #include "tokenizer.hpp"
 
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -14,7 +15,33 @@
 
 #include <curl/curl.h>
 
+#ifndef PREPROCESSOR_VERSION
+#define PREPROCESSOR_VERSION "unknown"
+#endif
+static constexpr const char* VERSION = PREPROCESSOR_VERSION;
+
+static void print_help() {
+    std::cout << "Usage: preprocessor_app [OPTIONS] [config_path]\n\n"
+              << "Options:\n"
+              << "  --help      Show this help message and exit\n"
+              << "  --version   Show version information and exit\n\n"
+              << "Arguments:\n"
+              << "  config_path  Path to JSON config file (default: config.json)\n";
+}
+
 int main(int argc, char* argv[]) {
+    // Handle --help / --version before anything else.
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+            print_help();
+            return 0;
+        }
+        if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
+            std::cout << "LLM Preprocessor v" << VERSION << "\n";
+            return 0;
+        }
+    }
+
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     int exit_code = 0;
@@ -30,6 +57,13 @@ int main(int argc, char* argv[]) {
         // --- 2. Initialize all pipeline components ---
         preprocessor::MemoryEngine memory(config.db_path);
         preprocessor::PromptCompiler compiler(config.system_prompt);
+
+        // Build ApiParams from config for the complete-payload mode.
+        preprocessor::ApiParams api_params;
+        api_params.model = config.api_model;
+        api_params.temperature = config.temperature;
+        api_params.max_tokens = config.max_tokens;
+        bool use_api_payload = api_params.model.has_value();
 
         // Semantic routing is optional — only enabled when model files exist.
         std::unique_ptr<preprocessor::IntentRouter> router;
@@ -78,9 +112,10 @@ int main(int argc, char* argv[]) {
             if (routing_enabled) {
                 auto matched = router->route(user_input);
                 if (matched) {
-                    std::cout << "[ACTION] " << *matched << "\n\n";
+                    std::cout << "[ACTION] " << matched->intent_name
+                              << " (score: " << matched->score << ")\n\n";
                     memory.add_message("user", user_input);
-                    memory.add_message("assistant", "Executed local action: " + *matched);
+                    memory.add_message("assistant", "Executed local action: " + matched->intent_name);
                     continue;
                 }
             }
@@ -99,20 +134,27 @@ int main(int argc, char* argv[]) {
 
             // --- 6. Retrieve conversation history and compile payload ---
             auto history = memory.get_recent_history(config.history_limit);
-            std::string payload = compiler.build_payload(user_input, retrieved_context, history);
 
-            // Display a clean version without history to avoid cluttering the terminal.
-            std::vector<std::pair<std::string, std::string>> empty_history;
-            std::string display_payload = compiler.build_payload(user_input, retrieved_context, empty_history);
-            std::cout << "\n=== LLM Payload ===\n" << display_payload << "\n";
+            if (use_api_payload) {
+                // Build display version (no history) for terminal output.
+                std::vector<std::pair<std::string, std::string>> empty_history;
+                auto display = compiler.build_payload_json(user_input, retrieved_context, empty_history, api_params);
+                std::cout << "\n=== LLM Payload ===\n" << display.dump(4) << "\n";
+            } else {
+                std::vector<std::pair<std::string, std::string>> empty_history;
+                std::string display_payload = compiler.build_payload(user_input, retrieved_context, empty_history);
+                std::cout << "\n=== LLM Payload ===\n" << display_payload << "\n";
+            }
             if (!history.empty()) {
                 std::cout << "(+ " << history.size() << " history messages included in payload)\n";
             }
             std::cout << "\n";
 
-            // Record this exchange.
+            // Record this exchange (user message only — update when LLM responds).
             memory.add_message("user", user_input);
-            memory.add_message("assistant", "(awaiting LLM response)");
+
+            // Auto-prune history to prevent unbounded growth.
+            memory.prune(config.history_limit * 2);
         }
 
     } catch (const std::exception& e) {

@@ -40,6 +40,7 @@ EmbeddingEngine::EmbeddingEngine(const std::string& model_path,
 }
 
 std::vector<float> EmbeddingEngine::generate_embedding(const std::string& text) {
+    std::lock_guard<std::mutex> lock(mutex_);
     Ort::AllocatorWithDefaultOptions allocator;
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
