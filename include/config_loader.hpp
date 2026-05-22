@@ -32,6 +32,11 @@ struct Config {
     std::size_t max_context_chars = 8000;
     std::string upstream_url = "https://api.openai.com/v1/chat/completions";
     std::string upstream_api_key;
+
+    // --- Phase 2: prompt optimiser settings (all optional) ---
+    bool prompt_optimizer_enabled = false;
+    std::string prompt_templates_path;  // empty = use built-in defaults
+    bool include_project_card = true;
 };
 
 class ConfigLoader {

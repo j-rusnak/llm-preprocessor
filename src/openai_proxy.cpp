@@ -2,6 +2,7 @@
 
 #include "llm_tokenizer.hpp"
 #include "prompt_cache.hpp"
+#include "prompt_optimizer.hpp"
 #include "proxy_metrics.hpp"
 #include "repo_index.hpp"
 #include "text_sanitizer.hpp"
@@ -146,6 +147,10 @@ OpenAIProxy::~OpenAIProxy() {
     if (server_ && server_->is_running()) server_->stop();
 }
 
+void OpenAIProxy::set_prompt_optimizer(PromptOptimizer* optimiser) noexcept {
+    optimiser_ = optimiser;
+}
+
 int OpenAIProxy::bind_to_port(const std::string& host, int port) {
     // httplib 0.38 returns bool from bind_to_port; use bind_to_any_port for
     // ephemeral binding so we can discover the actually-chosen port (port=0).
@@ -237,9 +242,15 @@ void OpenAIProxy::install_routes() {
 
         // Inject retrieved context as a system message.
         const std::size_t original_tokens = tokenizer_.count_tokens(req.body);
-        if (!retrieved.empty()) {
-            const std::string ctx = build_context_block(retrieved, config_.max_context_chars);
-            json sys_msg = {{"role", "system"}, {"content", ctx}};
+        std::string sys_content;
+        if (optimiser_) {
+            auto opt = optimiser_->optimise(user_msg, retrieved);
+            sys_content = std::move(opt.system_message);
+        } else if (!retrieved.empty()) {
+            sys_content = build_context_block(retrieved, config_.max_context_chars);
+        }
+        if (!sys_content.empty()) {
+            json sys_msg = {{"role", "system"}, {"content", sys_content}};
             // Place context right before the last user message so the LLM
             // treats it as fresh grounding.
             auto& msgs = body["messages"];

@@ -1,6 +1,6 @@
 {
   "name": "llm-preprocessor",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "C++17 RAG middleware and semantic context engine for AI coding assistants.",
   "dependencies": [
     "nlohmann-json",
@@ -10,6 +10,7 @@
     "hnswlib",
     "xxhash",
     "efsw",
-    "cpp-httplib"
+    "cpp-httplib",
+    "inja"
   ]
 }

@@ -88,6 +88,11 @@ public:
     std::size_t chunk_count() const;
     std::size_t file_count() const;
 
+    /// Snapshot of all currently-indexed chunks. O(n) copy; intended for
+    /// startup tasks like `ProjectCardBuilder`. Safe to call concurrently
+    /// with `search()`; serialised against indexing mutators.
+    std::vector<CodeChunk> snapshot_chunks() const;
+
 private:
     void index_file_locked(const std::string& file_path);
     void forget_file_locked(const std::string& file_path);

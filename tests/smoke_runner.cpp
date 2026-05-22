@@ -26,6 +26,11 @@
 #include "prompt_cache.hpp"
 #include "proxy_metrics.hpp"
 #include "repo_index.hpp"
+// Phase 2:
+#include "intent_classifier.hpp"
+#include "project_card.hpp"
+#include "prompt_optimizer.hpp"
+#include "prompt_templates.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -386,6 +391,91 @@ void stage_proxy(Stats& s, bool) {
     up_thr.join();
 }
 
+// ----------------------------- Phase 2 stages -----------------------------
+
+void stage_intent_classifier(Stats& s, bool) {
+    std::cout << "[intent_classifier]\n";
+    preprocessor::HeuristicIntentClassifier c;
+    bool ok = c.classify("refactor build_context_block") == preprocessor::PromptBucket::CodeEdit
+           && c.classify("explain why this loop terminates") == preprocessor::PromptBucket::CodeExplain
+           && c.classify("write a parser for json") == preprocessor::PromptBucket::CodeGenerate
+           && c.classify("which files import sqlite") == preprocessor::PromptBucket::MetaQuery;
+    report(s, "heuristic classifier routes 4 archetypes", ok);
+}
+
+void stage_project_card(Stats& s, bool verbose) {
+    std::cout << "[project_card]\n";
+    auto dir = fs::temp_directory_path() /
+               ("llm_pp_smoke_card_" +
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(dir);
+    {
+        std::ofstream(dir / "a.cpp") << "int compute_thing(){return 1;}\n";
+        std::ofstream(dir / "b.cpp") << "void do_stuff(){}\n";
+        std::ofstream(dir / "README.md") << "My project README\n";
+    }
+    try {
+        auto emb = std::make_shared<p1::HashEmbedder>(16);
+        auto chunker = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+        preprocessor::RepoIndexConfig cfg;
+        cfg.embedding_dim = 16;
+        cfg.watch_for_changes = false;
+        preprocessor::RepoIndex idx(emb, chunker, cfg);
+        idx.index_path(dir.string());
+        auto card = preprocessor::ProjectCardBuilder::build(idx, dir.string(), 30, 64);
+        if (verbose) std::cout << "    files=" << card.total_files
+                               << " chunks=" << card.total_chunks << "\n";
+        bool ok = card.total_files >= 2 &&
+                  card.files_by_extension[".cpp"] == 2 &&
+                  card.readme_excerpt.find("My project") != std::string::npos;
+        report(s, "card aggregates extensions + README", ok);
+        auto md = card.to_markdown();
+        report(s, "markdown rendering non-empty",
+               md.find(".cpp") != std::string::npos);
+    } catch (const std::exception& e) {
+        report(s, "project_card stage", false, e.what());
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+void stage_prompt_optimizer(Stats& s, bool) {
+    std::cout << "[prompt_optimizer]\n";
+    try {
+        auto cls = std::make_shared<preprocessor::HeuristicIntentClassifier>();
+        preprocessor::PromptOptimizerConfig cfg;
+        cfg.enabled = true;
+        cfg.include_project_card = false;
+        preprocessor::PromptOptimizer opt(preprocessor::PromptTemplates{}, cls, cfg);
+
+        preprocessor::RetrievedChunk rc;
+        rc.score = 1.0f;
+        rc.chunk.id = 7;
+        rc.chunk.text = "int add(int a,int b){return a+b;}";
+        rc.chunk.file_path = "src/math.cpp";
+        rc.chunk.symbol = "add";
+        rc.chunk.start_line = 1;
+        rc.chunk.end_line = 1;
+
+        auto r = opt.optimise("explain why this function works", {rc});
+        bool ok = r.used_template &&
+                  r.bucket == preprocessor::PromptBucket::CodeExplain &&
+                  r.system_message.find("src/math.cpp") != std::string::npos;
+        report(s, "enabled optimiser renders template with context", ok);
+
+        opt.set_enabled(false);
+        auto r2 = opt.optimise("explain why this function works", {rc});
+        report(s, "disabled optimiser falls back to plain block",
+               !r2.used_template &&
+               r2.system_message.find("Retrieved code context") != std::string::npos);
+
+        auto r3 = opt.optimise("hi", {});
+        report(s, "empty chunks + disabled card -> empty message", r3.system_message.empty());
+    } catch (const std::exception& e) {
+        report(s, "prompt_optimizer stage", false, e.what());
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -396,7 +486,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 Smoke Runner ===\n\n";
+    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 + Phase 2 Smoke Runner ===\n\n";
 
     Stats s;
     stage_chunker(s, verbose);
@@ -409,6 +499,9 @@ int main(int argc, char** argv) {
     stage_prompt_cache(s, verbose);
     stage_repo_index(s, verbose);
     stage_proxy(s, verbose);
+    stage_intent_classifier(s, verbose);
+    stage_project_card(s, verbose);
+    stage_prompt_optimizer(s, verbose);
 
     std::cout << "\nSummary: " << s.passed << " passed, " << s.failed << " failed.\n";
     return s.failed == 0 ? 0 : 1;

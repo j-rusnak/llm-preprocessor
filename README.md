@@ -47,8 +47,24 @@ proxy now sits between your IDE/agent and the upstream LLM:
   last user message.
 - `main --serve config.json` boots the full pipeline.
 
-Upcoming phases (project card + per-bucket prompt templates, code
-knowledge graph, MCP server / VS Code extension) are tracked in
+**Phase 2 (Project card + per-bucket templates) - complete.** The proxy
+now optimises prompts before sending them upstream:
+
+- `ProjectCard` - lightweight repository summary (extension histogram,
+  top symbols, README excerpt) built from the live `RepoIndex`.
+- `HeuristicIntentClassifier` - cheap, allocation-light router that
+  buckets each user turn into `CodeEdit`, `CodeExplain`, `CodeGenerate`,
+  `MetaQuery`, or `Freeform`.
+- `PromptTemplates` - [`inja`](https://github.com/pantor/inja)-rendered,
+  per-bucket prompt scaffolds with sensible built-ins and an optional
+  JSON override file (`prompt_templates_path`).
+- `PromptOptimizer` - toggleable (`prompt_optimizer_enabled`) pipeline
+  that classifies the turn, builds the context block to a char budget,
+  optionally injects the project card, and renders the bucket's template
+  as the system message. Disabled = exact Phase 1 behaviour.
+
+Upcoming phases (symbol graph / clangd-backed retrieval, MCP server +
+VS Code extension) are tracked in
 [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
 
 ## Architecture
@@ -98,6 +114,10 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, tokens saved. |
 | **RepoIndex** | `repo_index.hpp` | End-to-end chunk + embed + index over a repo, kept fresh by `FileWatcher`. |
 | **OpenAIProxy** | `openai_proxy.hpp` | cpp-httplib server, OpenAI-compatible chat completions with RAG context injection. |
+| **ProjectCard** | `project_card.hpp` | Repository summary (extensions, top symbols, README excerpt) derived from `RepoIndex`. |
+| **IntentClassifier** | `intent_classifier.hpp` | `IIntentClassifier` interface + `HeuristicIntentClassifier` for bucket routing. |
+| **PromptTemplates** | `prompt_templates.hpp` | `inja`-rendered, per-bucket prompt scaffolds; JSON-overridable. |
+| **PromptOptimizer** | `prompt_optimizer.hpp` | Toggleable prompt rewriter wiring classifier + templates + project card. |
 
 ## Tech Stack
 
@@ -109,6 +129,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 - **xxHash** - content-addressed chunk IDs
 - **efsw** - cross-platform file watching
 - **cpp-httplib** - embedded HTTP server for the OpenAI-compatible proxy
+- **inja** - Jinja2-style template engine for per-bucket prompt scaffolds
 - **Google Test** - unit testing
 
 ## Project Structure
@@ -321,6 +342,9 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `max_context_chars` | Cap on injected context | `8000` |
 | `upstream_url` | OpenAI-compatible URL to forward to | `https://api.openai.com/v1/chat/completions` |
 | `upstream_api_key` | Fallback bearer token if the client did not send one | — |
+| `prompt_optimizer_enabled` | Enable Phase 2 per-bucket prompt rewriting | `false` |
+| `prompt_templates_path` | Optional JSON file overriding bucket templates | *(empty)* |
+| `include_project_card` | Inject the `ProjectCard` summary into the system prompt | `true` |
 
 When `api_model` is set in config, payloads are emitted as complete API request bodies (`{model, messages, temperature, max_tokens}`). Without it, the old messages-only format is used.
 
