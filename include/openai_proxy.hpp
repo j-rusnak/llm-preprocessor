@@ -15,6 +15,7 @@ class RepoIndex;
 class PromptCache;
 class ProxyMetrics;
 class ILLMTokenizer;
+class PromptOptimizer;
 
 /// Configuration for `OpenAIProxy`.
 struct OpenAIProxyConfig {
@@ -68,6 +69,11 @@ public:
     OpenAIProxy(const OpenAIProxy&) = delete;
     OpenAIProxy& operator=(const OpenAIProxy&) = delete;
 
+    /// Install a Phase 2 prompt optimiser. Ownership stays with the caller;
+    /// the pointer must outlive the proxy. Pass `nullptr` to revert to the
+    /// Phase 1 plain-context behaviour.
+    void set_prompt_optimizer(PromptOptimizer* optimiser) noexcept;
+
     /// Bind to `host:port` without blocking. Returns the actually-bound port
     /// (useful when `port == 0` to let the OS pick one). Throws if bind fails.
     int bind_to_port(const std::string& host, int port);
@@ -90,6 +96,7 @@ private:
     ProxyMetrics& metrics_;
     ILLMTokenizer& tokenizer_;
     OpenAIProxyConfig config_;
+    PromptOptimizer* optimiser_ = nullptr;
     std::unique_ptr<httplib::Server> server_;
 };
 

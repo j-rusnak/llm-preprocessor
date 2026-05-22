@@ -85,6 +85,14 @@ Config ConfigLoader::load(const std::string& filepath) {
         throw std::invalid_argument("embedding_dim must be > 0");
     }
 
+    // --- Phase 2 fields (all optional). ---
+    config.prompt_optimizer_enabled = j.value("prompt_optimizer_enabled",
+                                              config.prompt_optimizer_enabled);
+    config.prompt_templates_path = j.value("prompt_templates_path",
+                                           config.prompt_templates_path);
+    config.include_project_card = j.value("include_project_card",
+                                          config.include_project_card);
+
     if (j.contains("intents") && j["intents"].is_array()) {
         for (const auto& intent : j["intents"]) {
             if (!intent.contains("name")) {

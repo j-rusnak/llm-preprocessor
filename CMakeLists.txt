@@ -72,6 +72,11 @@ add_library(preprocessor_lib
     src/proxy_metrics.cpp
     src/repo_index.cpp
     src/openai_proxy.cpp
+    # Phase 2 modules:
+    src/project_card.cpp
+    src/intent_classifier.cpp
+    src/prompt_templates.cpp
+    src/prompt_optimizer.cpp
 )
 
 target_include_directories(preprocessor_lib PUBLIC
@@ -87,6 +92,9 @@ find_package(efsw CONFIG REQUIRED)
 # --- Phase 1 dependencies ---
 find_package(httplib CONFIG REQUIRED)
 
+# --- Phase 2 dependencies ---
+find_package(inja CONFIG REQUIRED)
+
 # Link the external dependencies to your library
 target_link_libraries(preprocessor_lib PUBLIC
     nlohmann_json::nlohmann_json
@@ -97,6 +105,7 @@ target_link_libraries(preprocessor_lib PUBLIC
     xxHash::xxhash
     efsw::efsw
     httplib::httplib
+    pantor::inja
 )
 
 # --- 3. Define the Main Executable ---
@@ -125,6 +134,11 @@ add_executable(preprocessor_tests
     tests/test_proxy_metrics.cpp
     tests/test_repo_index.cpp
     tests/test_openai_proxy.cpp
+    # Phase 2 tests:
+    tests/test_project_card.cpp
+    tests/test_intent_classifier.cpp
+    tests/test_prompt_templates.cpp
+    tests/test_prompt_optimizer.cpp
     # tests/test_embedding_engine.cpp
 )
 

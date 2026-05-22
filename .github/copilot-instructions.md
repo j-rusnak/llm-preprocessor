@@ -32,9 +32,16 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   optional TTL), `RepoIndex` wiring `FileWatcher` to incremental
   re-indexing, `ProxyMetrics` for telemetry on tokens saved, `--serve`
   mode in `main`. Dependency added: `cpp-httplib`.
-- **Phase 2 (next):** Project card + per-bucket prompt templates (`inja`),
-  toggleable prompt optimiser.
-- **Phase 3:** Symbol graph (tree-sitter + clangd) with graph-aware expansion;
+- **Phase 2 (DONE):** Project card + per-bucket prompt templates -
+  `ProjectCard` + `ProjectCardBuilder` (extension histogram, top symbols,
+  README excerpt over `RepoIndex::snapshot_chunks`), `IIntentClassifier` +
+  `HeuristicIntentClassifier` (CodeEdit / CodeExplain / CodeGenerate /
+  MetaQuery / Freeform), `PromptTemplates` (built-in scaffolds rendered
+  via `inja`, JSON-overridable), `PromptOptimizer` (toggleable system-
+  message rewriter wired into `OpenAIProxy::set_prompt_optimizer`), new
+  config keys `prompt_optimizer_enabled` / `prompt_templates_path` /
+  `include_project_card`. Dependency added: `inja` (`pantor::inja`).
+- **Phase 3 (next):** Symbol graph (tree-sitter + clangd) with graph-aware expansion;
   zero-LLM fast path for structural queries.
 - **Phase 4:** MCP server mode + VS Code extension; single-binary distribution.
 - **Phase 5:** Optional local small-LLM prompt rewriter via `llama.cpp`.
@@ -51,7 +58,8 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   - `xxhash` - content-addressed chunk IDs + cache keys
   - `efsw` - cross-platform file-system watcher
   - `cpp-httplib` - embedded HTTP server for the OpenAI-compatible proxy
-  - Phase-2+ additions (when introduced): `tree-sitter` + grammars, `inja`,
+  - `inja` - Jinja2-style template engine for per-bucket prompt scaffolds
+  - Phase-3+ additions (when introduced): `tree-sitter` + grammars,
     a BPE tokenizer (e.g. `cpp-tiktoken`), `llama.cpp` (Phase 5)
 
 # Directory Structure (Flat)

@@ -3,11 +3,15 @@
 #include "config_loader.hpp"
 #include "context_gatherer.hpp"
 #include "embedding_engine.hpp"
+#include "intent_classifier.hpp"
 #include "intent_router.hpp"
 #include "llm_tokenizer.hpp"
 #include "openai_proxy.hpp"
+#include "project_card.hpp"
 #include "prompt_cache.hpp"
 #include "prompt_compiler.hpp"
+#include "prompt_optimizer.hpp"
+#include "prompt_templates.hpp"
 #include "proxy_metrics.hpp"
 #include "repo_index.hpp"
 #include "text_sanitizer.hpp"
@@ -71,6 +75,32 @@ static int run_serve(const preprocessor::Config& config) {
     pcfg.max_context_chars = config.max_context_chars;
 
     preprocessor::OpenAIProxy proxy(index, cache, metrics, llm_tokenizer, pcfg);
+
+    // Phase 2: optional prompt optimiser.
+    std::unique_ptr<preprocessor::PromptOptimizer> optimiser;
+    if (config.prompt_optimizer_enabled) {
+        preprocessor::PromptTemplates templates =
+            config.prompt_templates_path.empty()
+                ? preprocessor::PromptTemplates{}
+                : preprocessor::PromptTemplates::load_from_file(config.prompt_templates_path);
+        auto classifier = std::make_shared<preprocessor::HeuristicIntentClassifier>();
+        preprocessor::PromptOptimizerConfig ocfg;
+        ocfg.enabled = true;
+        ocfg.max_context_chars = config.max_context_chars;
+        ocfg.include_project_card = config.include_project_card;
+        optimiser = std::make_unique<preprocessor::PromptOptimizer>(
+            std::move(templates), std::move(classifier), ocfg);
+        if (config.include_project_card && !config.repo_root.empty()) {
+            optimiser->set_project_card(
+                preprocessor::ProjectCardBuilder::build(index, config.repo_root));
+        }
+        proxy.set_prompt_optimizer(optimiser.get());
+        std::cout << "[INFO] Prompt optimiser enabled (templates: "
+                  << (config.prompt_templates_path.empty() ? "built-in"
+                                                           : config.prompt_templates_path)
+                  << ")\n";
+    }
+
     std::cout << "[INFO] Proxy listening on http://" << config.proxy_host << ":"
               << config.proxy_port << "  (upstream: " << config.upstream_url << ")\n";
     proxy.listen(config.proxy_host, config.proxy_port);

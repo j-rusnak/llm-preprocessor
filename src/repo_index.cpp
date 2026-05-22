@@ -220,4 +220,12 @@ std::size_t RepoIndex::file_count() const {
     return ids_by_file_.size();
 }
 
+std::vector<CodeChunk> RepoIndex::snapshot_chunks() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::vector<CodeChunk> out;
+    out.reserve(chunks_by_id_.size());
+    for (const auto& kv : chunks_by_id_) out.push_back(kv.second);
+    return out;
+}
+
 } // namespace preprocessor
