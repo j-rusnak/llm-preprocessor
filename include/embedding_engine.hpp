@@ -22,6 +22,11 @@ public:
 
     std::vector<float> generate_embedding(const std::string& text) override;
 
+    /// True batched inference: pads variable-length inputs to the longest in
+    /// the batch and runs a single `Ort::Session::Run` call.
+    std::vector<std::vector<float>>
+    generate_embeddings(const std::vector<std::string>& texts) override;
+
 private:
     Ort::Env env_;
     Ort::SessionOptions session_options_;

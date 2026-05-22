@@ -1,96 +1,128 @@
 # LLM Preprocessor
 
-A high-performance C++17 middleware that intercepts user inputs, routes simple commands to local OS actions via semantic matching, and enriches complex queries with external context before handing them off to an LLM. The goal is to minimize expensive API calls by bypassing the LLM entirely for tasks that can be resolved locally.
+A high-performance C++17 **middleware for AI coding assistants**. It sits between the
+IDE/agent and the LLM API to (1) cut token spend, (2) reduce latency, and
+(3) act as a smart, local code-context engine — chunking source files, embedding
+them, and serving the smallest possible slice of context per prompt instead of
+letting the agent re-read entire files.
+
+A legacy command-routing path (semantic intent matching for OS actions) is
+preserved as a side feature.
+
+## Project Status
+
+**Phase 0 (Foundation Fixes) - complete.** The codebase has been re-architected
+around the new direction:
+
+- `MemoryEngine` split into `ChatHistoryStore` (SQLite) and `VectorStore`
+  (HNSW ANN index over code-chunk embeddings).
+- Real ANN backend via [`hnswlib`](https://github.com/nmslib/hnswlib).
+- Content-addressed chunking with [`xxhash`](https://github.com/Cyan4973/xxHash).
+- Cross-platform filesystem watching via [`efsw`](https://github.com/SpartanJ/efsw)
+  so the index can be re-built incrementally.
+- True batched ONNX inference; the legacy 15-window cap in `IntentRouter` is
+  gone.
+- Downstream-LLM token budgeting via `ILLMTokenizer` (heuristic backend now;
+  BPE / tiktoken-compatible in a later phase).
+- AST-aware `IChunker` interface in place with a `LineWindowChunker`
+  fallback; tree-sitter implementation lands in Phase 1.
+
+Upcoming phases (MVP RAG proxy, project card + prompt templates, code
+knowledge graph, MCP server / VS Code extension) are tracked in
+[`.github/copilot-instructions.md`](.github/copilot-instructions.md).
 
 ## Architecture
 
 ```
-User Input
-    │
-    ▼
-TextSanitizer ──► Tokenizer ──► EmbeddingEngine (ONNX Runtime)
-                                        │
-                                        ▼
-                                  IntentRouter
-                                   ╱        ╲
-                          Match found     No match
-                              │               │
-                              ▼               ▼
-                       Local Action     ContextGatherer ──► MemoryEngine
-                       (skip LLM)              │                  │
-                                               ▼                  ▼
-                                           PromptCompiler
-                                               │
-                                               ▼
-                                      JSON Payload (to host app)
+IDE / Agent prompt
+        |
+        v
+TextSanitizer ---> Tokenizer ---> EmbeddingEngine (ONNX Runtime, batched)
+        |                                  |
+        |                                  v
+        |                            IntentRouter (slash-commands /
+        |                            meta queries; optional)
+        |
+        v
+CodeChunker (line-window now, tree-sitter later)
+        |
+        v
+VectorStore (HNSW + xxhash IDs)  <-- FileWatcher (efsw) keeps it fresh
+        |
+        v
+PromptCompiler + ChatHistoryStore + ILLMTokenizer (budget enforcement)
+        |
+        v
+JSON payload (OpenAI-compatible) for the upstream LLM
 ```
 
 ## Pipeline Modules
 
 | Module | Header | Description |
 |---|---|---|
-| **ConfigLoader** | `config_loader.hpp` | Loads and validates JSON configuration (model paths, thresholds, intents). |
-| **TextSanitizer** | `text_sanitizer.hpp` | Normalizes input — lowercases, collapses whitespace, trims. |
-| **Tokenizer** | `tokenizer.hpp` | WordPiece tokenizer compatible with BERT-based models. Dynamically resolves `[CLS]`/`[SEP]`/`[UNK]` IDs from the vocabulary and truncates at 512 tokens. |
-| **EmbeddingEngine** | `embedding_engine.hpp` | Generates vector embeddings from text via ONNX Runtime inference. Supports `.onnx` and `.ort` model formats with attention-mask-aware mean pooling. |
-| **IntentRouter** | `intent_router.hpp` | Compares input embeddings against registered intents using cosine similarity. Strips common stop words and uses sliding-window subphrase extraction (capped at 15 ONNX inferences) to match commands in longer sentences. Returns a `RouteResult` with intent name and confidence score. Supports an action callback, plus runtime `remove_intent()` / `clear_intents()`. Thread-safe via `EmbeddingEngine` mutex. |
-| **ContextGatherer** | `context_gatherer.hpp` | Fetches external context from URLs (`libcurl`, RAII-wrapped handles) and extracts URLs from user input. Restricted to HTTP/HTTPS with a streaming-enforced 10 MB download limit. |
-| **MemoryEngine** | `memory_engine.hpp` | SQLite-backed conversation history. Stores, retrieves, updates (`update_last_message`), clears, and auto-prunes messages. Supports move semantics. |
-| **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final JSON payload. `build_payload()` returns a messages-only string (backward-compatible). `build_payload_json()` returns a `nlohmann::json` object with optional `model`/`temperature`/`max_tokens` for a complete API request body. |
+| **ConfigLoader** | `config_loader.hpp` | Loads and validates JSON configuration. |
+| **TextSanitizer** | `text_sanitizer.hpp` | Normalizes input - lowercases, collapses whitespace, trims. |
+| **Tokenizer** | `tokenizer.hpp` | WordPiece tokenizer for BERT-class embedders. |
+| **EmbeddingEngine** | `embedding_engine.hpp` | ONNX Runtime inference with **true batched** mean-pooled embeddings (`.onnx` / `.ort`). |
+| **IntentRouter** | `intent_router.hpp` | Cosine-similarity routing for slash-commands / OS actions. Batched sub-phrase search (no 15-window cap). |
+| **ContextGatherer** | `context_gatherer.hpp` | URL fetch via libcurl (HTTP/HTTPS, 10 MB cap). |
+| **ChatHistoryStore** | `chat_history_store.hpp` | SQLite chat-turn store. Replaces the old `MemoryEngine`. |
+| **VectorStore** | `vector_store.hpp` | Persistent HNSW ANN index keyed by 64-bit chunk IDs (xxhash). |
+| **CodeChunker** | `code_chunker.hpp` | `IChunker` interface + `LineWindowChunker` baseline; AST chunker arrives in Phase 1. |
+| **FileWatcher** | `file_watcher.hpp` | RAII wrapper around `efsw` for incremental re-indexing. |
+| **LLMTokenizer** | `llm_tokenizer.hpp` | Downstream-LLM token budgeter (`HeuristicLLMTokenizer` for now). |
+| **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final OpenAI-style JSON payload. |
 
 ## Tech Stack
 
 - **C++17** (strictly enforced)
 - **CMake 3.15+** with **vcpkg** manifest mode
-- **ONNX Runtime 1.23.2** — local embedding inference (official pre-built binary)
-- **libcurl** — HTTP fetching
-- **SQLite3** — conversation memory
-- **nlohmann/json** — JSON construction
-- **Google Test** — unit testing (76 tests across 8 suites)
+- **ONNX Runtime 1.23.2** - local embedding inference (pre-built binary)
+- **libcurl**, **SQLite3**, **nlohmann/json**
+- **hnswlib** - ANN index
+- **xxHash** - content-addressed chunk IDs
+- **efsw** - cross-platform file watching
+- **Google Test** - unit testing
 
 ## Project Structure
 
 ```
 ├── CMakeLists.txt
 ├── vcpkg.json
-├── config.json                 (runtime configuration)
+├── config.json
 ├── include/
+│   ├── chat_history_store.hpp
+│   ├── code_chunker.hpp
 │   ├── config_loader.hpp
 │   ├── context_gatherer.hpp
 │   ├── embedding_engine.hpp
+│   ├── file_watcher.hpp
+│   ├── i_embedding_engine.hpp
 │   ├── intent_router.hpp
-│   ├── memory_engine.hpp
+│   ├── llm_tokenizer.hpp
 │   ├── prompt_compiler.hpp
 │   ├── text_sanitizer.hpp
-│   └── tokenizer.hpp
+│   ├── tokenizer.hpp
+│   └── vector_store.hpp
 ├── src/
 │   ├── main.cpp
-│   ├── config_loader.cpp
-│   ├── context_gatherer.cpp
-│   ├── embedding_engine.cpp
-│   ├── intent_router.cpp
-│   ├── memory_engine.cpp
-│   ├── prompt_compiler.cpp
-│   ├── text_sanitizer.cpp
-│   └── tokenizer.cpp
+│   └── (one .cpp per header above)
 ├── tests/
+│   ├── smoke_runner.cpp           (Phase 0 integration framework)
+│   ├── test_chat_history_store.cpp
+│   ├── test_code_chunker.cpp
 │   ├── test_config_loader.cpp
 │   ├── test_context_gatherer.cpp
-│   ├── test_embedding_engine.cpp
+│   ├── test_file_watcher.cpp
 │   ├── test_intent_router.cpp
-│   ├── test_memory_engine.cpp
+│   ├── test_llm_tokenizer.cpp
 │   ├── test_prompt_compiler.cpp
 │   ├── test_text_sanitizer.cpp
-│   └── test_tokenizer.cpp
+│   ├── test_tokenizer.cpp
+│   └── test_vector_store.cpp
 ├── benchmarks/
-│   ├── benchmark_runner.cpp    (C++ benchmark executable)
-│   ├── visualize.py            (Python chart generator)
-│   ├── run_benchmarks.ps1      (PowerShell orchestration)
-│   └── results/                (generated JSON + PNGs)
 ├── models/
-│   ├── model.onnx / model.ort  (ONNX embedding model)
-│   └── vocab.txt               (WordPiece vocabulary)
-└── onnxruntime-win-x64-1.23.2/ (pre-built ONNX Runtime SDK)
+└── onnxruntime-win-x64-1.23.2/
 ```
 
 ## Prerequisites
@@ -143,12 +175,40 @@ copy onnxruntime-win-x64-1.23.2\lib\onnxruntime.dll build\
 
 ## Testing
 
-See [Running the Test Suite](#running-the-test-suite) below for the full guide.
+Three complementary surfaces:
 
-```bash
+### 1. Unit tests (Google Test)
+
+Fast, hermetic per-module tests. Run via CTest:
+
+```powershell
 cd build
 ctest --output-on-failure
 ```
+
+Or the binary directly with filtering:
+
+```powershell
+.\build\preprocessor_tests.exe --gtest_filter=VectorStoreTest.*
+```
+
+### 2. Integration smoke runner (Phase 0 framework)
+
+`tests/smoke_runner.cpp` exercises every new module end-to-end against a
+synthetic in-memory "repo". Uses a deterministic hash-based fake embedder so
+it does NOT require the ONNX model and stays sub-second.
+
+```powershell
+.\build\smoke_runner.exe            # PASS/FAIL summary
+.\build\smoke_runner.exe --verbose  # per-stage detail
+```
+
+Exit code is `0` on full pass, non-zero on any failure - safe to wire into CI.
+
+### 3. Benchmark runner
+
+Latency / accuracy charts for the semantic router. See
+[Benchmarks & Visualizations](#benchmarks--visualizations).
 
 ## Configuration
 

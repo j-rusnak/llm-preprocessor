@@ -1,39 +1,91 @@
 # Role and Goal
-You are an expert C++ developer architecting a lightning-fast, standalone Preprocessor and Semantic Router for Large Language Models (LLMs). Your goal is to write highly optimized, production-ready C++ code that intercepts user inputs, routes them to local OS commands if a semantic match is found, gathers external context (RAG/Web), and efficiently packages prompts for LLM APIs.
+You are an expert C++ developer building a **plug-and-play middleware for AI coding
+assistants** (Cursor, Continue, Copilot, Claude Code, etc.). Your job is to write
+production-grade, low-latency C++ that intercepts prompts/completions, retrieves
+the smallest relevant slice of local code context, enforces token budgets, and
+forwards an optimised payload to the upstream LLM. The legacy command-routing path
+(local OS actions via semantic intent matching) is preserved as a side feature.
 
 # Project Context & Architecture
 - **Project Name:** LLM Preprocessor
-- **Core Pipeline:** Intercept Input -> Sanitize -> Semantic Route (Cosine Similarity via ONNX) -> Gather Context (SQLite/libcurl) -> Call LLM API.
-- **Goal:** Minimize expensive LLM API calls by bypassing the LLM for simple tasks (e.g., "turn down volume", "open file") and inject rich context when the LLM is actually needed.
+- **Primary goals (in order):**
+  1. Reduce input/output tokens sent to upstream LLMs (cost).
+  2. Reduce end-to-end latency (speed).
+  3. Act as a smart local context engine (chunk + embed + index + retrieve).
+- **Core pipeline:** Intercept prompt -> Sanitize -> (optional) Intent route ->
+  Chunk + embed repo on first run / on file change -> ANN retrieve top-k chunks
+  -> Compile prompt within token budget -> Forward to LLM.
+- **Non-goals:** training models, hosting LLMs, IDE UI, language-server
+  features. We *consume* clangd/LSPs in later phases; we never replace them.
+
+# Roadmap (kept here so multi-step work stays aligned)
+- **Phase 0 (DONE):** Foundation fixes - real ANN (`hnswlib`), content-addressed
+  chunks (`xxhash`), filesystem watching (`efsw`), batched ONNX inference,
+  `MemoryEngine` split into `ChatHistoryStore` + `VectorStore`, downstream LLM
+  tokenizer interface, `IChunker` interface + `LineWindowChunker` fallback,
+  end-to-end smoke runner.
+- **Phase 1 (next):** MVP RAG proxy - tree-sitter AST chunker, OpenAI-compatible
+  HTTP proxy intercept, BM25 + vector hybrid retrieval (RRF fusion),
+  prompt-result cache keyed by `(prompt + chunk_hashes + model)`, file-watcher
+  wired to incremental re-indexing, telemetry on tokens saved.
+- **Phase 2:** Project card + per-bucket prompt templates (`inja`), toggleable
+  prompt optimiser.
+- **Phase 3:** Symbol graph (tree-sitter + clangd) with graph-aware expansion;
+  zero-LLM fast path for structural queries.
+- **Phase 4:** MCP server mode + VS Code extension; single-binary distribution.
+- **Phase 5:** Optional local small-LLM prompt rewriter via `llama.cpp`.
 
 # Tech Stack & Build System
-- **Language Standard:** C++17 (Strictly enforced).
-- **Build System:** CMake (Version 3.15+). All new source files must be added to the `CMakeLists.txt` target.
-- **Dependency Management:** `vcpkg` via a `vcpkg.json` manifest file.
-- **Allowed Third-Party Libraries:** - `nlohmann/json` (for JSON parsing and payload construction)
-  - `libcurl` (for REST API calls to LLMs and web scraping)
-  - `onnxruntime` (for local embedding generation)
-  - SQLite C/C++ bindings (for memory/history)
+- **Language Standard:** C++17 (strictly enforced).
+- **Build System:** CMake 3.15+. Add every new `.cpp` to `preprocessor_lib` and
+  every new test to `preprocessor_tests`.
+- **Dependency Management:** vcpkg manifest (`vcpkg.json`).
+- **Allowed Third-Party Libraries:**
+  - `nlohmann/json`, `libcurl`, `sqlite3`, `gtest`
+  - `onnxruntime` (pre-built binary, not vcpkg) - local embedding inference
+  - `hnswlib` - HNSW ANN index over code embeddings
+  - `xxhash` - content-addressed chunk IDs
+  - `efsw` - cross-platform file-system watcher
+  - Phase-1+ additions (when introduced): `tree-sitter` + grammars, `inja`,
+    a BPE tokenizer (e.g. `cpp-tiktoken`), `llama.cpp` (Phase 5)
 
-# Directory Structure (Flat Format)
-Adhere strictly to this flat structure. Do NOT create nested subdirectories inside `include` or `src` unless explicitly requested.
-- `include/`: Contains all public headers (`.hpp`).
-- `src/`: Contains all private implementations (`.cpp`).
-- `CMakeLists.txt`: Root build script.
-- `vcpkg.json`: Dependency manifest.
+# Directory Structure (Flat)
+- `include/` - public headers (`.hpp`); `#pragma once`; minimal includes.
+- `src/` - one `.cpp` per header.
+- `tests/` - one `test_<module>.cpp` per module, plus `smoke_runner.cpp` for
+  end-to-end integration.
+- `CMakeLists.txt`, `vcpkg.json` at the root.
+
+Do NOT introduce nested subfolders inside `include/` or `src/` without an
+explicit request.
 
 # C++ Coding Standards & Best Practices
-1. **Header Files:** Always use `#pragma once` at the top of header files. Include only what is necessary in headers; move implementation-specific includes to the `.cpp` files.
-2. **Includes:** Use quotes (`#include "filename.hpp"`) for local project headers and angle brackets (`#include <string>`) for standard library and external dependencies.
-3. **Memory Management:** Strictly adhere to RAII (Resource Acquisition Is Initialization). Use `std::unique_ptr` and `std::shared_ptr`. DO NOT use manual `new` or `delete` (raw pointers).
-4. **Error Handling:** Use standard C++ exceptions (`std::runtime_error`, `std::invalid_argument`). Do not fail silently. For network calls (libcurl), ensure timeouts and HTTP error codes are handled gracefully.
-5. **Performance:** Pass complex objects (like `std::string` or `std::vector`) by const reference (`const std::string&`) to avoid unnecessary copying.
-6. **Namespaces:** Wrap all project code inside the `preprocessor` namespace to avoid global scope pollution.
+1. `#pragma once` at the top of every header; forward-declare in headers, fully
+   include in `.cpp`.
+2. Local includes use `"..."`; standard/external use `<...>`.
+3. RAII everywhere. No raw `new` / `delete`. Use `std::unique_ptr` /
+   `std::shared_ptr`. Use the pimpl idiom when a header would otherwise pull
+   in a heavy third-party header (see `FileWatcher::Impl`).
+4. Throw `std::runtime_error` / `std::invalid_argument` on failure; never fail
+   silently. Network code (libcurl) must set timeouts and check HTTP codes.
+5. Pass complex objects by `const&`. Prefer `std::string_view` for read-only
+   string params introduced in new code.
+6. Wrap all project code in `namespace preprocessor`.
+7. Anything that touches the upstream LLM must go through `ILLMTokenizer` for
+   budget accounting; do not eyeball token counts.
+8. Anything that stores or searches vectors must go through `VectorStore`; do
+   not implement ad-hoc cosine loops.
+9. New chunker implementations derive from `IChunker`. New embedder
+   implementations from `IEmbeddingEngine`.
 
 # Workflow Instructions for the AI
-- When asked to create a new feature, ALWAYS generate the `.hpp` interface file first, followed by the `.cpp` implementation file.
-- Remind the user to add the newly created `.cpp` file to the `CMakeLists.txt` if you generate a new file.
-- ALWAYS write or update unit tests for every new feature and any behavior changes. Place tests in the `tests/` directory and keep them aligned with the production code changes.
-- If a change is significant (new feature, changed behavior, build/setup changes, or architecture-impacting updates), ALWAYS update `README.md` to reflect the new reality.
-- Keep `main.cpp` as clean as possible. It should only instantiate classes from the `include/` directory and run the main application loop.
-- Prioritize low-latency execution. The preprocessor must be faster than the LLM it sits in front of.
+- For new features: generate the `.hpp` interface first, then the `.cpp`.
+- When you add a new `.cpp`, add it to `preprocessor_lib` in `CMakeLists.txt`
+  in the same change.
+- ALWAYS add or update unit tests in `tests/` for new behaviour. If a feature
+  is cross-module, also extend `tests/smoke_runner.cpp` with a stage.
+- Significant changes (new module, new dep, architecture pivot, build/setup
+  changes) MUST update `README.md` and this file.
+- Keep `main.cpp` thin - it only wires modules together and runs the loop.
+- Latency is a feature. Prefer batched / mmap / zero-copy paths over clever
+  abstractions. Profile before optimising; benchmark via `benchmark_runner`.
