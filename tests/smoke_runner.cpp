@@ -18,6 +18,14 @@
 #include "file_watcher.hpp"
 #include "llm_tokenizer.hpp"
 #include "vector_store.hpp"
+// Phase 1:
+#include "bm25_index.hpp"
+#include "hybrid_retriever.hpp"
+#include "i_embedding_engine.hpp"
+#include "openai_proxy.hpp"
+#include "prompt_cache.hpp"
+#include "proxy_metrics.hpp"
+#include "repo_index.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -26,8 +34,11 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <httplib.h>
 #include <iomanip>
 #include <iostream>
+#include <memory>
+#include <nlohmann/json.hpp>
 #include <random>
 #include <sstream>
 #include <string>
@@ -153,10 +164,10 @@ void stage_history(Stats& s, bool) {
 void stage_tokenizer(Stats& s, bool) {
     std::cout << "[llm_tokenizer]\n";
     preprocessor::HeuristicLLMTokenizer tk;
-    auto small = tk.count_tokens("hello world");
-    auto big = tk.count_tokens(std::string(4000, 'x'));
-    report(s, "tokenizer monotonic", big > small,
-           "small=" + std::to_string(small) + " big=" + std::to_string(big));
+    auto few = tk.count_tokens("hello world");
+    auto many = tk.count_tokens(std::string(4000, 'x'));
+    report(s, "tokenizer monotonic", many > few,
+           "few=" + std::to_string(few) + " many=" + std::to_string(many));
 }
 
 void stage_file_watcher(Stats& s, bool verbose) {
@@ -192,6 +203,189 @@ void stage_file_watcher(Stats& s, bool verbose) {
     fs::remove_all(dir, ec);
 }
 
+// ----------------------------- Phase 1 stages -----------------------------
+
+namespace p1 {
+
+class HashEmbedder : public preprocessor::IEmbeddingEngine {
+public:
+    explicit HashEmbedder(std::size_t dim) : dim_(dim) {}
+    std::vector<float> generate_embedding(const std::string& text) override {
+        std::vector<float> v(dim_, 0.0f);
+        std::size_t h = std::hash<std::string>{}(text);
+        for (std::size_t i = 0; i < dim_; ++i)
+            v[i] = static_cast<float>(((h >> (i % 32)) & 0xFF) / 255.0);
+        float n = 0.0f; for (float x : v) n += x*x;
+        n = n > 0 ? std::sqrt(n) : 1.0f;
+        for (auto& x : v) x /= n;
+        return v;
+    }
+private:
+    std::size_t dim_;
+};
+
+} // namespace p1
+
+void stage_bm25(Stats& s, bool) {
+    std::cout << "[bm25_index]\n";
+    preprocessor::BM25Index idx;
+    idx.add(1, "void compute_hash(int x) { return x * 31; }");
+    idx.add(2, "void render_screen() { draw_frame(); }");
+    idx.add(3, "int main() { return 0; }");
+    auto hits = idx.search("compute hash", 5);
+    bool ok = !hits.empty() && hits[0].id == 1;
+    report(s, "BM25 ranks identifier match first", ok);
+    idx.remove(1);
+    auto h2 = idx.search("compute", 5);
+    bool removed = h2.empty() || h2[0].id != 1;
+    report(s, "BM25 remove() drops doc", removed);
+}
+
+void stage_hybrid(Stats& s, bool) {
+    std::cout << "[hybrid_retriever]\n";
+    preprocessor::VectorStore vec(8, 64);
+    preprocessor::BM25Index bm;
+    auto axis = [](int a){ std::vector<float> v(8,0); v[a%8]=1; return v; };
+    vec.add(1, axis(0)); bm.add(1, "alpha");
+    vec.add(2, axis(1)); bm.add(2, "beta gamma");
+    vec.add(3, axis(2)); bm.add(3, "delta epsilon");
+    preprocessor::HybridRetriever h(vec, bm);
+    auto hits = h.search("beta", axis(0), 3);
+    bool saw1 = false, saw2 = false;
+    for (auto& r : hits) { if (r.id == 1) saw1 = true; if (r.id == 2) saw2 = true; }
+    report(s, "RRF fuses vector + keyword hits", saw1 && saw2);
+}
+
+void stage_prompt_cache(Stats& s, bool) {
+    std::cout << "[prompt_cache]\n";
+    try {
+        preprocessor::PromptCache c(":memory:");
+        auto k = preprocessor::PromptCache::make_key("m", "p", {3,1,2});
+        c.put(k, "payload-1");
+        auto got = c.get(k);
+        report(s, "put/get round trip", got.has_value() && *got == "payload-1");
+        auto k2 = preprocessor::PromptCache::make_key("m", "p", {1,2,3});
+        report(s, "key is order-invariant in chunk ids", k == k2);
+    } catch (const std::exception& e) {
+        report(s, "prompt_cache stage", false, e.what());
+    }
+}
+
+void stage_repo_index(Stats& s, bool verbose) {
+    std::cout << "[repo_index]\n";
+    auto dir = fs::temp_directory_path() /
+               ("llm_pp_smoke_repo_" +
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(dir);
+    {
+        std::ofstream(dir / "a.cpp")
+            << "int compute_hash(int x) { return x * 31; }\n";
+        std::ofstream(dir / "b.cpp")
+            << "void render_screen() { draw_frame(); }\n";
+    }
+
+    try {
+        auto embedder = std::make_shared<p1::HashEmbedder>(16);
+        auto chunker  = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+        preprocessor::RepoIndexConfig cfg;
+        cfg.embedding_dim = 16;
+        cfg.watch_for_changes = false;
+        preprocessor::RepoIndex idx(embedder, chunker, cfg);
+        idx.index_path(dir.string());
+        if (verbose) std::cout << "    files=" << idx.file_count()
+                               << " chunks=" << idx.chunk_count() << "\n";
+        report(s, "indexed synthetic repo", idx.chunk_count() > 0);
+
+        auto hits = idx.search("compute_hash", 3);
+        bool ok = !hits.empty() &&
+                  hits[0].chunk.file_path.find("a.cpp") != std::string::npos;
+        report(s, "hybrid search returns relevant chunk", ok);
+    } catch (const std::exception& e) {
+        report(s, "repo_index stage", false, e.what());
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+void stage_proxy(Stats& s, bool) {
+    std::cout << "[openai_proxy]\n";
+    using nlohmann::json;
+
+    // Fake upstream.
+    auto upstream = std::make_shared<httplib::Server>();
+    std::atomic<int> upstream_calls{0};
+    upstream->Post("/v1/chat/completions",
+                   [&](const httplib::Request&, httplib::Response& res) {
+        upstream_calls.fetch_add(1);
+        json out = {
+            {"id","fake"},
+            {"choices", json::array({
+                {{"message", {{"role","assistant"},{"content","ok"}}}}
+            })}
+        };
+        res.set_content(out.dump(), "application/json");
+    });
+    int up_port = upstream->bind_to_any_port("127.0.0.1");
+    std::thread up_thr([&]{ upstream->listen_after_bind(); });
+
+    try {
+        auto embedder = std::make_shared<p1::HashEmbedder>(16);
+        auto chunker  = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+        preprocessor::RepoIndexConfig icfg;
+        icfg.embedding_dim = 16;
+        icfg.watch_for_changes = false;
+        preprocessor::RepoIndex idx(embedder, chunker, icfg);
+        preprocessor::PromptCache cache(":memory:");
+        preprocessor::ProxyMetrics metrics;
+        preprocessor::HeuristicLLMTokenizer tk;
+        preprocessor::OpenAIProxyConfig pcfg;
+        pcfg.upstream_url = "http://127.0.0.1:" + std::to_string(up_port)
+                          + "/v1/chat/completions";
+        preprocessor::OpenAIProxy proxy(idx, cache, metrics, tk, pcfg);
+        int p_port = proxy.bind_to_port("127.0.0.1", 0);
+        std::thread p_thr([&]{ proxy.listen_after_bind(); });
+
+        // wait for health
+        for (int i = 0; i < 100; ++i) {
+            httplib::Client cli("127.0.0.1", p_port);
+            auto r = cli.Get("/healthz");
+            if (r && r->status == 200) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        httplib::Client cli("127.0.0.1", p_port);
+        cli.set_read_timeout(5, 0);
+        json body = {
+            {"model","gpt-test"},
+            {"messages", json::array({
+                {{"role","user"},{"content","hello world"}}
+            })}
+        };
+        auto r1 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+        report(s, "proxy forwards request", r1 && r1->status == 200);
+
+        auto r2 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+        report(s, "proxy serves second hit from cache",
+               r2 && r2->status == 200 && upstream_calls.load() == 1);
+
+        auto stats = cli.Get("/stats");
+        bool stats_ok = false;
+        if (stats && stats->status == 200) {
+            auto j = json::parse(stats->body);
+            stats_ok = j["requests_total"] == 2u && j["cache_hits"] == 1u;
+        }
+        report(s, "stats endpoint reports counters", stats_ok);
+
+        proxy.stop();
+        p_thr.join();
+    } catch (const std::exception& e) {
+        report(s, "openai_proxy stage", false, e.what());
+    }
+
+    upstream->stop();
+    up_thr.join();
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -202,7 +396,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "=== LLM Preprocessor :: Phase 0 Smoke Runner ===\n\n";
+    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 Smoke Runner ===\n\n";
 
     Stats s;
     stage_chunker(s, verbose);
@@ -210,6 +404,11 @@ int main(int argc, char** argv) {
     stage_history(s, verbose);
     stage_tokenizer(s, verbose);
     stage_file_watcher(s, verbose);
+    stage_bm25(s, verbose);
+    stage_hybrid(s, verbose);
+    stage_prompt_cache(s, verbose);
+    stage_repo_index(s, verbose);
+    stage_proxy(s, verbose);
 
     std::cout << "\nSummary: " << s.passed << " passed, " << s.failed << " failed.\n";
     return s.failed == 0 ? 0 : 1;

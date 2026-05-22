@@ -18,16 +18,36 @@ around the new direction:
   (HNSW ANN index over code-chunk embeddings).
 - Real ANN backend via [`hnswlib`](https://github.com/nmslib/hnswlib).
 - Content-addressed chunking with [`xxhash`](https://github.com/Cyan4973/xxHash).
-- Cross-platform filesystem watching via [`efsw`](https://github.com/SpartanJ/efsw)
-  so the index can be re-built incrementally.
-- True batched ONNX inference; the legacy 15-window cap in `IntentRouter` is
-  gone.
-- Downstream-LLM token budgeting via `ILLMTokenizer` (heuristic backend now;
-  BPE / tiktoken-compatible in a later phase).
-- AST-aware `IChunker` interface in place with a `LineWindowChunker`
-  fallback; tree-sitter implementation lands in Phase 1.
+- Cross-platform filesystem watching via [`efsw`](https://github.com/SpartanJ/efsw).
+- True batched ONNX inference; the legacy 15-window cap in `IntentRouter` is gone.
+- Downstream-LLM token budgeting via `ILLMTokenizer` (heuristic backend now).
+- AST-aware `IChunker` interface with a `LineWindowChunker` fallback.
 
-Upcoming phases (MVP RAG proxy, project card + prompt templates, code
+**Phase 1 (MVP RAG proxy) - complete.** A drop-in OpenAI-compatible local
+proxy now sits between your IDE/agent and the upstream LLM:
+
+- `BraceAwareChunker` - language-agnostic AST-ish chunker that respects
+  brace depth modulo comments/strings (C, C++, JS, Java, Rust, ...). The
+  tree-sitter backend will slot in behind the same `IChunker` interface in a
+  later iteration.
+- `BM25Index` - Okapi BM25 ranker with identifier-aware tokenisation
+  (`snake_case` + `camelCase` splitting).
+- `HybridRetriever` - fuses `VectorStore` ANN hits with BM25 hits via
+  Reciprocal Rank Fusion (RRF, `k=60`).
+- `PromptCache` - SQLite-backed cache keyed by
+  `xxhash64(model || prompt || sorted(chunk_ids))` with optional TTL.
+- `ProxyMetrics` - lock-free atomic counters for requests, cache hits,
+  upstream calls, errors, and **tokens saved** (compiled vs original).
+- `RepoIndex` - wires `BraceAwareChunker` + embedder + `VectorStore` +
+  `BM25Index` + `HybridRetriever` and watches the repo via `FileWatcher`
+  for incremental re-indexing.
+- `OpenAIProxy` - cpp-httplib server exposing `POST /v1/chat/completions`,
+  `GET /healthz`, and `GET /stats`. Forwards to the configured upstream
+  with libcurl, injecting retrieved context as a system message before the
+  last user message.
+- `main --serve config.json` boots the full pipeline.
+
+Upcoming phases (project card + per-bucket prompt templates, code
 knowledge graph, MCP server / VS Code extension) are tracked in
 [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
 
@@ -68,10 +88,16 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **ContextGatherer** | `context_gatherer.hpp` | URL fetch via libcurl (HTTP/HTTPS, 10 MB cap). |
 | **ChatHistoryStore** | `chat_history_store.hpp` | SQLite chat-turn store. Replaces the old `MemoryEngine`. |
 | **VectorStore** | `vector_store.hpp` | Persistent HNSW ANN index keyed by 64-bit chunk IDs (xxhash). |
-| **CodeChunker** | `code_chunker.hpp` | `IChunker` interface + `LineWindowChunker` baseline; AST chunker arrives in Phase 1. |
+| **CodeChunker** | `code_chunker.hpp` | `IChunker` interface + `LineWindowChunker` and `BraceAwareChunker`. |
 | **FileWatcher** | `file_watcher.hpp` | RAII wrapper around `efsw` for incremental re-indexing. |
 | **LLMTokenizer** | `llm_tokenizer.hpp` | Downstream-LLM token budgeter (`HeuristicLLMTokenizer` for now). |
 | **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final OpenAI-style JSON payload. |
+| **BM25Index** | `bm25_index.hpp` | Okapi BM25 ranker with identifier-aware tokenisation. |
+| **HybridRetriever** | `hybrid_retriever.hpp` | RRF fusion of `VectorStore` + `BM25Index` hits. |
+| **PromptCache** | `prompt_cache.hpp` | SQLite-backed cache of upstream responses, keyed by `(model, prompt, chunk_ids)`. |
+| **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, tokens saved. |
+| **RepoIndex** | `repo_index.hpp` | End-to-end chunk + embed + index over a repo, kept fresh by `FileWatcher`. |
+| **OpenAIProxy** | `openai_proxy.hpp` | cpp-httplib server, OpenAI-compatible chat completions with RAG context injection. |
 
 ## Tech Stack
 
@@ -82,6 +108,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 - **hnswlib** - ANN index
 - **xxHash** - content-addressed chunk IDs
 - **efsw** - cross-platform file watching
+- **cpp-httplib** - embedded HTTP server for the OpenAI-compatible proxy
 - **Google Test** - unit testing
 
 ## Project Structure
@@ -254,11 +281,46 @@ Each intent supports multiple synonym examples via the `"examples"` array. The r
 ## Running
 
 ```powershell
-.\build\preprocessor_app.exe                  # uses config.json
-.\build\preprocessor_app.exe my_config.json   # custom config path
-.\build\preprocessor_app.exe --help            # show usage
-.\build\preprocessor_app.exe --version         # show version
+.\build\preprocessor_app.exe                       # interactive REPL, uses config.json
+.\build\preprocessor_app.exe my_config.json        # custom config path
+.\build\preprocessor_app.exe --serve config.json   # start OpenAI-compatible RAG proxy
+.\build\preprocessor_app.exe --help                # show usage
+.\build\preprocessor_app.exe --version             # show version
 ```
+
+### Running as an OpenAI-compatible RAG proxy
+
+`--serve` indexes `repo_root` and starts an HTTP server on `proxy_host:proxy_port`.
+Point any OpenAI-compatible client (Cursor, Continue, etc.) at it:
+
+```powershell
+.\build\preprocessor_app.exe --serve config.json
+# then in your IDE set the OpenAI base URL to http://127.0.0.1:8088
+```
+
+Endpoints:
+
+- `POST /v1/chat/completions` - drop-in OpenAI chat completions; the proxy
+  retrieves top-k relevant code chunks, injects them as a system message,
+  forwards to `upstream_url`, caches the response by
+  `(model, prompt, chunk_ids)`.
+- `GET /healthz` - liveness check.
+- `GET /stats` - JSON snapshot of `ProxyMetrics` (tokens saved, cache hits,
+  upstream calls, errors).
+
+Phase 1 config keys (in addition to the Phase 0 ones):
+
+| Key | Description | Default |
+|---|---|---|
+| `proxy_host` | Bind address for `--serve` | `"127.0.0.1"` |
+| `proxy_port` | Bind port for `--serve` | `8088` |
+| `repo_root` | Directory to chunk + index on startup | *(optional)* |
+| `cache_db_path` | SQLite file backing `PromptCache` | `"prompt_cache.db"` |
+| `retrieval_k` | Top-k chunks injected per request | `6` |
+| `embedding_dim` | Must match the embedder | `384` |
+| `max_context_chars` | Cap on injected context | `8000` |
+| `upstream_url` | OpenAI-compatible URL to forward to | `https://api.openai.com/v1/chat/completions` |
+| `upstream_api_key` | Fallback bearer token if the client did not send one | — |
 
 When `api_model` is set in config, payloads are emitted as complete API request bodies (`{model, messages, temperature, max_tokens}`). Without it, the old messages-only format is used.
 

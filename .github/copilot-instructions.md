@@ -24,12 +24,16 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   `MemoryEngine` split into `ChatHistoryStore` + `VectorStore`, downstream LLM
   tokenizer interface, `IChunker` interface + `LineWindowChunker` fallback,
   end-to-end smoke runner.
-- **Phase 1 (next):** MVP RAG proxy - tree-sitter AST chunker, OpenAI-compatible
-  HTTP proxy intercept, BM25 + vector hybrid retrieval (RRF fusion),
-  prompt-result cache keyed by `(prompt + chunk_hashes + model)`, file-watcher
-  wired to incremental re-indexing, telemetry on tokens saved.
-- **Phase 2:** Project card + per-bucket prompt templates (`inja`), toggleable
-  prompt optimiser.
+- **Phase 1 (DONE):** MVP RAG proxy - `BraceAwareChunker` (AST-ish chunker;
+  tree-sitter slots in behind the same `IChunker` later), `OpenAIProxy`
+  (cpp-httplib server with `POST /v1/chat/completions`, `GET /healthz`,
+  `GET /stats`), `BM25Index` + `HybridRetriever` (RRF fusion, `k=60`),
+  `PromptCache` (SQLite, xxhash64 of `(model, prompt, sorted(chunk_ids))`,
+  optional TTL), `RepoIndex` wiring `FileWatcher` to incremental
+  re-indexing, `ProxyMetrics` for telemetry on tokens saved, `--serve`
+  mode in `main`. Dependency added: `cpp-httplib`.
+- **Phase 2 (next):** Project card + per-bucket prompt templates (`inja`),
+  toggleable prompt optimiser.
 - **Phase 3:** Symbol graph (tree-sitter + clangd) with graph-aware expansion;
   zero-LLM fast path for structural queries.
 - **Phase 4:** MCP server mode + VS Code extension; single-binary distribution.
@@ -44,9 +48,10 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   - `nlohmann/json`, `libcurl`, `sqlite3`, `gtest`
   - `onnxruntime` (pre-built binary, not vcpkg) - local embedding inference
   - `hnswlib` - HNSW ANN index over code embeddings
-  - `xxhash` - content-addressed chunk IDs
+  - `xxhash` - content-addressed chunk IDs + cache keys
   - `efsw` - cross-platform file-system watcher
-  - Phase-1+ additions (when introduced): `tree-sitter` + grammars, `inja`,
+  - `cpp-httplib` - embedded HTTP server for the OpenAI-compatible proxy
+  - Phase-2+ additions (when introduced): `tree-sitter` + grammars, `inja`,
     a BPE tokenizer (e.g. `cpp-tiktoken`), `llama.cpp` (Phase 5)
 
 # Directory Structure (Flat)

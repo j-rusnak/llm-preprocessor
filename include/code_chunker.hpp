@@ -56,4 +56,35 @@ private:
     std::size_t overlap_lines_;
 };
 
+/// Brace-aware chunker for curly-brace languages (C, C++, Java, JS, Rust).
+///
+/// Walks the source once, tracking brace depth while respecting `// ... \n`
+/// and `/* ... */` comments and `"..."` / `'...'` string literals. Whenever
+/// a top-level (`depth == 0`) `{ ... }` block closes, the lines spanning
+/// that block plus the preceding signature line are emitted as one chunk
+/// and assigned a best-guess symbol name (the last identifier before the
+/// opening brace). Top-level non-block lines are accumulated into a
+/// `<preamble>` chunk so includes / using-declarations stay searchable.
+///
+/// Files larger than `max_chunk_lines` (e.g. a 5000-line generated header
+/// declared at depth 0) are split into windows by an internal fallback so a
+/// pathological input cannot produce a single multi-MB chunk.
+///
+/// This is Phase 1's AST-ish chunker. A tree-sitter implementation can drop
+/// in behind the same `IChunker` interface later for non-brace languages.
+class BraceAwareChunker : public IChunker {
+public:
+    BraceAwareChunker(std::size_t max_chunk_lines = 400,
+                      std::size_t min_chunk_lines = 3);
+
+    std::vector<CodeChunk> chunk(const std::string& file_path,
+                                 const std::string& source) const override;
+
+    std::string name() const override { return "brace-aware"; }
+
+private:
+    std::size_t max_chunk_lines_;
+    std::size_t min_chunk_lines_;
+};
+
 } // namespace preprocessor
