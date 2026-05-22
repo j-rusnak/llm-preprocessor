@@ -9,7 +9,7 @@ enable_testing()
 # --- 1. Find the Packages (Downloaded by vcpkg) ---
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(CURL REQUIRED)
-# find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
 # --- ONNX Runtime (official pre-built binary) ---
@@ -45,28 +45,47 @@ else()
 endif()
 
 # --- 2. Define your Core Preprocessor Library ---
+#
+# Phase 0 modules:
+#   chat_history_store  - SQLite chat memory (replaces MemoryEngine)
+#   vector_store        - HNSW ANN index for code-chunk embeddings
+#   llm_tokenizer       - downstream-LLM token budgeting (heuristic for now)
+#   code_chunker        - line-window chunker; tree-sitter slot in Phase 1
+#   file_watcher        - efsw wrapper for incremental re-indexing
 add_library(preprocessor_lib
     src/intent_router.cpp
-    # src/embedding_engine.cpp
+    src/embedding_engine.cpp
     src/context_gatherer.cpp
     src/tokenizer.cpp
-    src/memory_engine.cpp
+    src/chat_history_store.cpp
+    src/vector_store.cpp
+    src/llm_tokenizer.cpp
+    src/code_chunker.cpp
+    src/file_watcher.cpp
     src/prompt_compiler.cpp
     src/text_sanitizer.cpp
     src/config_loader.cpp
 )
 
-target_include_directories(preprocessor_lib PUBLIC 
+target_include_directories(preprocessor_lib PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
+
+# --- Phase 0 dependencies (vcpkg manifest mode) ---
+find_package(hnswlib CONFIG REQUIRED)
+find_package(xxHash CONFIG REQUIRED)
+find_package(efsw CONFIG REQUIRED)
 
 # Link the external dependencies to your library
 target_link_libraries(preprocessor_lib PUBLIC
     nlohmann_json::nlohmann_json
     CURL::libcurl
-    # onnxruntime
-    sqlite3
+    onnxruntime
+    unofficial::sqlite3::sqlite3
+    hnswlib::hnswlib
+    xxHash::xxhash
+    efsw::efsw
 )
 
 # --- 3. Define the Main Executable ---
@@ -79,11 +98,15 @@ include(GoogleTest)
 add_executable(preprocessor_tests
     tests/test_text_sanitizer.cpp
     tests/test_intent_router.cpp
-    tests/test_memory_engine.cpp
+    tests/test_chat_history_store.cpp
     tests/test_prompt_compiler.cpp
     tests/test_context_gatherer.cpp
     tests/test_config_loader.cpp
     tests/test_tokenizer.cpp
+    tests/test_vector_store.cpp
+    tests/test_llm_tokenizer.cpp
+    tests/test_code_chunker.cpp
+    tests/test_file_watcher.cpp
     # tests/test_embedding_engine.cpp
 )
 
@@ -119,3 +142,21 @@ install(EXPORT LLMPreprocessorTargets
     NAMESPACE LLMPreprocessor::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LLMPreprocessor
 )
+
+# --- 7. Copy ONNX Runtime DLL next to executables on Windows ---
+if(WIN32)
+    foreach(_tgt preprocessor_app preprocessor_tests benchmark_runner)
+        add_custom_command(TARGET ${_tgt} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ORT_ROOT}/lib/onnxruntime.dll"
+                $<TARGET_FILE_DIR:${_tgt}>)
+    endforeach()
+endif()
+
+# --- 8. Integration smoke-test runner (Phase 0 framework) ---
+#
+# Exercises the new modules end-to-end against a small synthetic repo. Not a
+# unit test; intended to be run manually or in CI to validate the full Phase 0
+# pipeline (chunk -> embed -> index -> retrieve -> tokenize).
+add_executable(smoke_runner tests/smoke_runner.cpp)
+target_link_libraries(smoke_runner PRIVATE preprocessor_lib)

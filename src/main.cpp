@@ -1,8 +1,9 @@
+#include "chat_history_store.hpp"
 #include "config_loader.hpp"
 #include "context_gatherer.hpp"
 #include "embedding_engine.hpp"
 #include "intent_router.hpp"
-#include "memory_engine.hpp"
+#include "llm_tokenizer.hpp"
 #include "prompt_compiler.hpp"
 #include "text_sanitizer.hpp"
 #include "tokenizer.hpp"
@@ -30,7 +31,6 @@ static void print_help() {
 }
 
 int main(int argc, char* argv[]) {
-    // Handle --help / --version before anything else.
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_help();
@@ -46,7 +46,6 @@ int main(int argc, char* argv[]) {
 
     int exit_code = 0;
     try {
-        // --- 1. Load configuration ---
         std::string config_path = "config.json";
         if (argc > 1) {
             config_path = argv[1];
@@ -54,18 +53,16 @@ int main(int argc, char* argv[]) {
 
         preprocessor::Config config = preprocessor::ConfigLoader::load(config_path);
 
-        // --- 2. Initialize all pipeline components ---
-        preprocessor::MemoryEngine memory(config.db_path);
+        preprocessor::ChatHistoryStore history_store(config.db_path);
         preprocessor::PromptCompiler compiler(config.system_prompt);
+        preprocessor::HeuristicLLMTokenizer llm_tokenizer;
 
-        // Build ApiParams from config for the complete-payload mode.
         preprocessor::ApiParams api_params;
         api_params.model = config.api_model;
         api_params.temperature = config.temperature;
         api_params.max_tokens = config.max_tokens;
         bool use_api_payload = api_params.model.has_value();
 
-        // Semantic routing is optional — only enabled when model files exist.
         std::unique_ptr<preprocessor::IntentRouter> router;
         bool routing_enabled = false;
 
@@ -84,22 +81,20 @@ int main(int argc, char* argv[]) {
             }
             routing_enabled = true;
         } else {
-            std::cout << "[INFO] Model files not found — semantic routing disabled.\n";
+            std::cout << "[INFO] Model files not found - semantic routing disabled.\n";
             std::cout << "       model_path: " << config.model_path << "\n";
             std::cout << "       vocab_path: " << config.vocab_path << "\n";
         }
 
         std::cout << "\nLLM Preprocessor ready. Type your input (or 'quit' to exit).\n\n";
 
-        // --- 3. Interactive loop ---
         std::string line;
         while (true) {
             std::cout << "> ";
             if (!std::getline(std::cin, line)) {
-                break; // EOF
+                break;
             }
 
-            // Sanitize input.
             std::string user_input = preprocessor::TextSanitizer::sanitize(line);
             if (user_input.empty()) {
                 continue;
@@ -108,19 +103,17 @@ int main(int argc, char* argv[]) {
                 break;
             }
 
-            // --- 4. Attempt semantic routing (if available) ---
             if (routing_enabled) {
                 auto matched = router->route(user_input);
                 if (matched) {
                     std::cout << "[ACTION] " << matched->intent_name
                               << " (score: " << matched->score << ")\n\n";
-                    memory.add_message("user", user_input);
-                    memory.add_message("assistant", "Executed local action: " + matched->intent_name);
+                    history_store.add_message("user", user_input);
+                    history_store.add_message("assistant", "Executed local action: " + matched->intent_name);
                     continue;
                 }
             }
 
-            // --- 5. Gather external context from URLs found in input ---
             std::string retrieved_context;
             auto urls = preprocessor::ContextGatherer::extract_urls(line);
             for (const auto& url : urls) {
@@ -132,29 +125,27 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // --- 6. Retrieve conversation history and compile payload ---
-            auto history = memory.get_recent_history(config.history_limit);
+            auto history = history_store.get_recent_history(config.history_limit);
 
             if (use_api_payload) {
-                // Build display version (no history) for terminal output.
                 std::vector<std::pair<std::string, std::string>> empty_history;
                 auto display = compiler.build_payload_json(user_input, retrieved_context, empty_history, api_params);
-                std::cout << "\n=== LLM Payload ===\n" << display.dump(4) << "\n";
+                const std::string dumped = display.dump(4);
+                std::cout << "\n=== LLM Payload ===\n" << dumped << "\n";
+                std::cout << "[~tokens: " << llm_tokenizer.count_tokens(dumped) << "]\n";
             } else {
                 std::vector<std::pair<std::string, std::string>> empty_history;
                 std::string display_payload = compiler.build_payload(user_input, retrieved_context, empty_history);
                 std::cout << "\n=== LLM Payload ===\n" << display_payload << "\n";
+                std::cout << "[~tokens: " << llm_tokenizer.count_tokens(display_payload) << "]\n";
             }
             if (!history.empty()) {
                 std::cout << "(+ " << history.size() << " history messages included in payload)\n";
             }
             std::cout << "\n";
 
-            // Record this exchange (user message only — update when LLM responds).
-            memory.add_message("user", user_input);
-
-            // Auto-prune history to prevent unbounded growth.
-            memory.prune(config.history_limit * 2);
+            history_store.add_message("user", user_input);
+            history_store.prune(config.history_limit * 2);
         }
 
     } catch (const std::exception& e) {
