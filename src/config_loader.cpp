@@ -68,6 +68,23 @@ Config ConfigLoader::load(const std::string& filepath) {
         config.max_tokens = mt;
     }
 
+    // --- Phase 1 fields (all optional). ---
+    config.proxy_host = j.value("proxy_host", config.proxy_host);
+    config.proxy_port = j.value("proxy_port", config.proxy_port);
+    config.repo_root  = j.value("repo_root", config.repo_root);
+    config.cache_db_path = j.value("cache_db_path", config.cache_db_path);
+    config.retrieval_k = j.value("retrieval_k", config.retrieval_k);
+    config.embedding_dim = j.value("embedding_dim", config.embedding_dim);
+    config.max_context_chars = j.value("max_context_chars", config.max_context_chars);
+    config.upstream_url = j.value("upstream_url", config.upstream_url);
+    config.upstream_api_key = j.value("upstream_api_key", config.upstream_api_key);
+    if (config.proxy_port < 0 || config.proxy_port > 65535) {
+        throw std::invalid_argument("proxy_port must be 0-65535");
+    }
+    if (config.embedding_dim == 0) {
+        throw std::invalid_argument("embedding_dim must be > 0");
+    }
+
     if (j.contains("intents") && j["intents"].is_array()) {
         for (const auto& intent : j["intents"]) {
             if (!intent.contains("name")) {

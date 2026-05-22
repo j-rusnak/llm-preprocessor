@@ -65,6 +65,13 @@ add_library(preprocessor_lib
     src/prompt_compiler.cpp
     src/text_sanitizer.cpp
     src/config_loader.cpp
+    # Phase 1 modules:
+    src/bm25_index.cpp
+    src/hybrid_retriever.cpp
+    src/prompt_cache.cpp
+    src/proxy_metrics.cpp
+    src/repo_index.cpp
+    src/openai_proxy.cpp
 )
 
 target_include_directories(preprocessor_lib PUBLIC
@@ -77,6 +84,9 @@ find_package(hnswlib CONFIG REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 find_package(efsw CONFIG REQUIRED)
 
+# --- Phase 1 dependencies ---
+find_package(httplib CONFIG REQUIRED)
+
 # Link the external dependencies to your library
 target_link_libraries(preprocessor_lib PUBLIC
     nlohmann_json::nlohmann_json
@@ -86,6 +96,7 @@ target_link_libraries(preprocessor_lib PUBLIC
     hnswlib::hnswlib
     xxHash::xxhash
     efsw::efsw
+    httplib::httplib
 )
 
 # --- 3. Define the Main Executable ---
@@ -107,6 +118,13 @@ add_executable(preprocessor_tests
     tests/test_llm_tokenizer.cpp
     tests/test_code_chunker.cpp
     tests/test_file_watcher.cpp
+    # Phase 1 tests:
+    tests/test_bm25_index.cpp
+    tests/test_hybrid_retriever.cpp
+    tests/test_prompt_cache.cpp
+    tests/test_proxy_metrics.cpp
+    tests/test_repo_index.cpp
+    tests/test_openai_proxy.cpp
     # tests/test_embedding_engine.cpp
 )
 

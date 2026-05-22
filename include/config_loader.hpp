@@ -21,6 +21,17 @@ struct Config {
     std::optional<std::string> api_endpoint;
     std::optional<float> temperature;
     std::optional<int> max_tokens;
+
+    // --- Phase 1: proxy + retrieval settings (all optional) ---
+    std::string proxy_host = "127.0.0.1";
+    int proxy_port = 8088;
+    std::string repo_root;                    // empty = don't index a repo
+    std::string cache_db_path = "prompt_cache.db";
+    std::size_t retrieval_k = 6;
+    std::size_t embedding_dim = 384;
+    std::size_t max_context_chars = 8000;
+    std::string upstream_url = "https://api.openai.com/v1/chat/completions";
+    std::string upstream_api_key;
 };
 
 class ConfigLoader {

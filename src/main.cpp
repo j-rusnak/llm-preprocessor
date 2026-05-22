@@ -1,10 +1,15 @@
 #include "chat_history_store.hpp"
+#include "code_chunker.hpp"
 #include "config_loader.hpp"
 #include "context_gatherer.hpp"
 #include "embedding_engine.hpp"
 #include "intent_router.hpp"
 #include "llm_tokenizer.hpp"
+#include "openai_proxy.hpp"
+#include "prompt_cache.hpp"
 #include "prompt_compiler.hpp"
+#include "proxy_metrics.hpp"
+#include "repo_index.hpp"
 #include "text_sanitizer.hpp"
 #include "tokenizer.hpp"
 
@@ -25,12 +30,56 @@ static void print_help() {
     std::cout << "Usage: preprocessor_app [OPTIONS] [config_path]\n\n"
               << "Options:\n"
               << "  --help      Show this help message and exit\n"
-              << "  --version   Show version information and exit\n\n"
+              << "  --version   Show version information and exit\n"
+              << "  --serve     Run the OpenAI-compatible HTTP proxy\n\n"
               << "Arguments:\n"
               << "  config_path  Path to JSON config file (default: config.json)\n";
 }
 
+static int run_serve(const preprocessor::Config& config) {
+    if (!std::filesystem::exists(config.model_path) ||
+        !std::filesystem::exists(config.vocab_path)) {
+        std::cerr << "[FATAL] --serve requires model + vocab files. Missing:\n"
+                  << "  model_path: " << config.model_path << "\n"
+                  << "  vocab_path: " << config.vocab_path << "\n";
+        return 2;
+    }
+
+    auto tokenizer = std::make_shared<preprocessor::Tokenizer>(config.vocab_path);
+    auto embedder  = std::make_shared<preprocessor::EmbeddingEngine>(config.model_path, tokenizer);
+    auto chunker   = std::make_shared<preprocessor::BraceAwareChunker>();
+
+    preprocessor::RepoIndexConfig idx_cfg;
+    idx_cfg.embedding_dim = config.embedding_dim;
+    preprocessor::RepoIndex index(embedder, chunker, idx_cfg);
+
+    if (!config.repo_root.empty()) {
+        std::cout << "[INFO] Indexing repo: " << config.repo_root << "\n";
+        index.index_path(config.repo_root);
+        std::cout << "[INFO] Indexed " << index.file_count() << " files / "
+                  << index.chunk_count() << " chunks\n";
+    }
+
+    preprocessor::PromptCache cache(config.cache_db_path);
+    preprocessor::ProxyMetrics metrics;
+    preprocessor::HeuristicLLMTokenizer llm_tokenizer;
+
+    preprocessor::OpenAIProxyConfig pcfg;
+    pcfg.upstream_url = config.upstream_url;
+    pcfg.upstream_api_key = config.upstream_api_key;
+    pcfg.retrieval_k = config.retrieval_k;
+    pcfg.max_context_chars = config.max_context_chars;
+
+    preprocessor::OpenAIProxy proxy(index, cache, metrics, llm_tokenizer, pcfg);
+    std::cout << "[INFO] Proxy listening on http://" << config.proxy_host << ":"
+              << config.proxy_port << "  (upstream: " << config.upstream_url << ")\n";
+    proxy.listen(config.proxy_host, config.proxy_port);
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
+    bool serve_mode = false;
+    std::string config_path = "config.json";
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_help();
@@ -40,18 +89,24 @@ int main(int argc, char* argv[]) {
             std::cout << "LLM Preprocessor v" << VERSION << "\n";
             return 0;
         }
+        if (std::strcmp(argv[i], "--serve") == 0) {
+            serve_mode = true;
+            continue;
+        }
+        config_path = argv[i];
     }
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     int exit_code = 0;
     try {
-        std::string config_path = "config.json";
-        if (argc > 1) {
-            config_path = argv[1];
-        }
-
         preprocessor::Config config = preprocessor::ConfigLoader::load(config_path);
+
+        if (serve_mode) {
+            exit_code = run_serve(config);
+            curl_global_cleanup();
+            return exit_code;
+        }
 
         preprocessor::ChatHistoryStore history_store(config.db_path);
         preprocessor::PromptCompiler compiler(config.system_prompt);
