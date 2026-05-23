@@ -89,6 +89,21 @@ add_library(preprocessor_lib
     src/mcp_server.cpp
     # Phase 5 modules:
     src/prompt_rewriter.cpp
+    # Phase 6 modules:
+    src/diff_patcher.cpp
+    # Phase 7 modules:
+    src/embedding_cache.cpp
+    # Phase 8 modules:
+    src/model_router.cpp
+    # Phase 9 modules:
+    src/ab_harness.cpp
+    # Phase 10 modules:
+    src/sync_endpoint.cpp
+    # Phase 11 modules:
+    src/streaming_compactor.cpp
+    # Phase 12 modules:
+    src/auth_middleware.cpp
+    src/rate_limiter.cpp
 )
 
 target_include_directories(preprocessor_lib PUBLIC
@@ -165,6 +180,15 @@ add_executable(preprocessor_tests
     tests/test_mcp_server.cpp
     # Phase 5 tests:
     tests/test_prompt_rewriter.cpp
+    # Phase 6-12 tests:
+    tests/test_diff_patcher.cpp
+    tests/test_embedding_cache.cpp
+    tests/test_model_router.cpp
+    tests/test_ab_harness.cpp
+    tests/test_sync_endpoint.cpp
+    tests/test_streaming_compactor.cpp
+    tests/test_auth_middleware.cpp
+    tests/test_rate_limiter.cpp
     # tests/test_embedding_engine.cpp
 )
 

@@ -35,6 +35,14 @@
 #include "graph_aware_retriever.hpp"
 #include "mcp_server.hpp"
 #include "prompt_rewriter.hpp"
+#include "diff_patcher.hpp"
+#include "embedding_cache.hpp"
+#include "model_router.hpp"
+#include "ab_harness.hpp"
+#include "sync_endpoint.hpp"
+#include "streaming_compactor.hpp"
+#include "auth_middleware.hpp"
+#include "rate_limiter.hpp"
 #include "structural_query_engine.hpp"
 #include "symbol_graph.hpp"
 
@@ -673,6 +681,87 @@ void stage_prompt_rewriter(Stats& s, bool) {
     }
 }
 
+void stage_phase6_through_12(Stats& s, bool) {
+    std::cout << "[phase6_12]\n";
+    try {
+        // Phase 6: DiffPatcher
+        preprocessor::DiffPatcher dp;
+        std::string diff =
+            "--- a/x.txt\n"
+            "+++ b/x.txt\n"
+            "@@ -1,2 +1,2 @@\n"
+            " hello\n"
+            "-world\n"
+            "+earth\n";
+        std::unordered_map<std::string, std::string> contents{{"x.txt", "hello\nworld\n"}};
+        auto patched = dp.apply(diff, contents);
+        report(s, "diff parses & applies", patched.ok && !patched.files.empty() &&
+               patched.files[0].patched_content.find("earth") != std::string::npos);
+
+        // Phase 7: EmbeddingCache
+        auto db = std::filesystem::temp_directory_path() / "smoke_emb.db";
+        std::error_code ec; std::filesystem::remove(db, ec);
+        preprocessor::EmbeddingCache cache(db.string(), "m");
+        std::vector<float> v{1.0f, 2.0f, 3.0f};
+        cache.put("code", v);
+        auto got = cache.get("code");
+        report(s, "embedding cache roundtrips", got.has_value() && got->size() == 3);
+
+        // Phase 8: ModelRouter
+        preprocessor::ModelRouter router;
+        preprocessor::ModelTier t; t.name = "cheap"; t.upstream_url = "http://x"; t.model_name = "m";
+        router.add_tier(t);
+        preprocessor::ModelRoute r; r.bucket = preprocessor::PromptBucket::CodeExplain; r.tier = "cheap";
+        router.add_route(r);
+        auto* sel = router.route(preprocessor::PromptBucket::CodeExplain, 100);
+        report(s, "router selects tier", sel && sel->name == "cheap");
+
+        // Phase 9: AbHarness
+        preprocessor::AbHarness ab;
+        preprocessor::AbExperiment exp; exp.id = "e1";
+        exp.variants.push_back({"a", 1.0});
+        exp.variants.push_back({"b", 1.0});
+        ab.define(exp);
+        auto v1 = ab.assign("e1", "user-1");
+        auto v2 = ab.assign("e1", "user-1");
+        report(s, "ab harness is sticky", v1 == v2 && !v1.empty());
+
+        // Phase 10: SyncEndpoint
+        preprocessor::SyncEndpoint sync;
+        preprocessor::SyncBundle b;
+        b.cache.push_back({"k", "val"});
+        auto j = sync.to_json(b);
+        auto back = sync.from_json(j);
+        report(s, "sync json roundtrip", back.cache.size() == 1 && back.cache[0].key == "k");
+
+        // Phase 11: StreamingCompactor
+        preprocessor::StreamingCompactor::Config cc;
+        cc.max_total_chars = 50;
+        cc.keep_recent = 1;
+        preprocessor::StreamingCompactor comp(cc);
+        std::vector<preprocessor::ChatTurn> h;
+        for (int i = 0; i < 8; ++i) h.push_back({"user", "message " + std::to_string(i)});
+        auto cr = comp.compact(h);
+        report(s, "compactor rolls older turns", cr.rolled > 0 && !cr.rolled_summary.empty());
+
+        // Phase 12: AuthMiddleware + RateLimiter
+        preprocessor::AuthMiddleware::Config acfg; acfg.hmac_secret = "shh";
+        preprocessor::AuthMiddleware auth(acfg);
+        auto sig = preprocessor::AuthMiddleware::sign("shh", 100, "body");
+        report(s, "auth hmac verifies", auth.verify("", sig, "100", "body", 100));
+        report(s, "auth hmac rejects wrong sig", !auth.verify("", "deadbeef", "100", "body", 100));
+
+        preprocessor::RateLimiter::Config rcfg;
+        rcfg.tokens_per_second = 1.0; rcfg.burst = 1.0;
+        preprocessor::RateLimiter rl(rcfg);
+        bool a1 = rl.try_acquire("k", 1.0);
+        bool a2 = rl.try_acquire("k", 1.0);
+        report(s, "rate limiter throttles", a1 && !a2);
+    } catch (const std::exception& e) {
+        report(s, "phase6_12 stage", false, e.what());
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -683,7 +772,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5 Smoke Runner ===\n\n";
+    std::cout << "=== LLM Preprocessor :: Phase 0-12 Smoke Runner ===\n\n";
 
     Stats s;
     stage_chunker(s, verbose);
@@ -704,6 +793,7 @@ int main(int argc, char** argv) {
     stage_structural_query(s, verbose);
     stage_mcp_server(s, verbose);
     stage_prompt_rewriter(s, verbose);
+    stage_phase6_through_12(s, verbose);
 
     std::cout << "\nSummary: " << s.passed << " passed, " << s.failed << " failed.\n";
     return s.failed == 0 ? 0 : 1;
