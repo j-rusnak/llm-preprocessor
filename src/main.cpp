@@ -6,6 +6,7 @@
 #include "intent_classifier.hpp"
 #include "intent_router.hpp"
 #include "llm_tokenizer.hpp"
+#include "mcp_server.hpp"
 #include "openai_proxy.hpp"
 #include "project_card.hpp"
 #include "prompt_cache.hpp"
@@ -37,7 +38,8 @@ static void print_help() {
               << "Options:\n"
               << "  --help      Show this help message and exit\n"
               << "  --version   Show version information and exit\n"
-              << "  --serve     Run the OpenAI-compatible HTTP proxy\n\n"
+              << "  --serve     Run the OpenAI-compatible HTTP proxy\n"
+              << "  --mcp       Run as an MCP server over stdio (JSON-RPC)\n\n"
               << "Arguments:\n"
               << "  config_path  Path to JSON config file (default: config.json)\n";
 }
@@ -137,8 +139,66 @@ static int run_serve(const preprocessor::Config& config) {
     return 0;
 }
 
+static int run_mcp(const preprocessor::Config& config) {
+    if (!std::filesystem::exists(config.model_path) ||
+        !std::filesystem::exists(config.vocab_path)) {
+        std::cerr << "[FATAL] --mcp requires model + vocab files. Missing:\n"
+                  << "  model_path: " << config.model_path << "\n"
+                  << "  vocab_path: " << config.vocab_path << "\n";
+        return 2;
+    }
+
+    auto tokenizer = std::make_shared<preprocessor::Tokenizer>(config.vocab_path);
+    auto embedder  = std::make_shared<preprocessor::EmbeddingEngine>(config.model_path, tokenizer);
+    auto chunker   = std::make_shared<preprocessor::BraceAwareChunker>();
+
+    preprocessor::RepoIndexConfig idx_cfg;
+    idx_cfg.embedding_dim = config.embedding_dim;
+    preprocessor::RepoIndex index(embedder, chunker, idx_cfg);
+
+    std::unique_ptr<preprocessor::SymbolGraph> symbol_graph;
+    std::unique_ptr<preprocessor::RegexSymbolExtractor> symbol_extractor;
+    if (config.symbol_graph_enabled) {
+        symbol_graph = std::make_unique<preprocessor::SymbolGraph>();
+        symbol_extractor = std::make_unique<preprocessor::RegexSymbolExtractor>();
+        index.attach_symbol_graph(symbol_graph.get(), symbol_extractor.get());
+    }
+
+    if (!config.repo_root.empty()) {
+        std::cerr << "[INFO] Indexing repo: " << config.repo_root << "\n";
+        index.index_path(config.repo_root);
+        std::cerr << "[INFO] Indexed " << index.file_count() << " files / "
+                  << index.chunk_count() << " chunks\n";
+    }
+
+    preprocessor::McpServerConfig mcfg;
+    mcfg.default_search_k = config.retrieval_k;
+    preprocessor::McpServer server(index, mcfg);
+
+    std::unique_ptr<preprocessor::StructuralQueryEngine> structural;
+    if (symbol_graph) {
+        server.set_symbol_graph(symbol_graph.get());
+        if (config.structural_fast_path_enabled) {
+            structural = std::make_unique<preprocessor::StructuralQueryEngine>(
+                *symbol_graph, index);
+            server.set_structural_engine(structural.get());
+        }
+    }
+
+    preprocessor::ProjectCard card;
+    if (config.include_project_card && !config.repo_root.empty()) {
+        card = preprocessor::ProjectCardBuilder::build(index, config.repo_root);
+        server.set_project_card(&card);
+    }
+
+    std::cerr << "[INFO] MCP server ready on stdio (JSON-RPC 2.0)\n";
+    server.serve_stdio(std::cin, std::cout);
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     bool serve_mode = false;
+    bool mcp_mode = false;
     std::string config_path = "config.json";
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
@@ -153,6 +213,10 @@ int main(int argc, char* argv[]) {
             serve_mode = true;
             continue;
         }
+        if (std::strcmp(argv[i], "--mcp") == 0) {
+            mcp_mode = true;
+            continue;
+        }
         config_path = argv[i];
     }
 
@@ -164,6 +228,11 @@ int main(int argc, char* argv[]) {
 
         if (serve_mode) {
             exit_code = run_serve(config);
+            curl_global_cleanup();
+            return exit_code;
+        }
+        if (mcp_mode) {
+            exit_code = run_mcp(config);
             curl_global_cleanup();
             return exit_code;
         }

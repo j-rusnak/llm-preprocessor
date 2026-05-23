@@ -1,0 +1,62 @@
+{
+  "name": "llm-preprocessor-vscode",
+  "displayName": "LLM Preprocessor",
+  "description": "Run the LLM Preprocessor as a local MCP server inside VS Code.",
+  "version": "0.4.0",
+  "publisher": "llm-preprocessor",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "categories": [
+    "Other",
+    "AI"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "LLM Preprocessor",
+      "properties": {
+        "llmPreprocessor.binaryPath": {
+          "type": "string",
+          "default": "preprocessor_app",
+          "description": "Absolute path (or PATH-resolvable name) of the preprocessor_app binary."
+        },
+        "llmPreprocessor.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to config.json passed to the preprocessor. Empty = use the binary's default."
+        },
+        "llmPreprocessor.cwd": {
+          "type": "string",
+          "default": "",
+          "description": "Working directory for the spawned process. Empty = first workspace folder."
+        },
+        "llmPreprocessor.serverLabel": {
+          "type": "string",
+          "default": "llm-preprocessor",
+          "description": "Display name for the MCP server registered with VS Code."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "llmPreprocessor.restart",
+        "title": "LLM Preprocessor: Restart MCP Server"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.99.0",
+    "typescript": "^5.4.0"
+  }
+}
