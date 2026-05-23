@@ -4,6 +4,7 @@
 #include "llm_tokenizer.hpp"
 #include "prompt_cache.hpp"
 #include "prompt_optimizer.hpp"
+#include "prompt_rewriter.hpp"
 #include "proxy_metrics.hpp"
 #include "repo_index.hpp"
 #include "structural_query_engine.hpp"
@@ -163,6 +164,10 @@ void OpenAIProxy::set_structural_query_engine(StructuralQueryEngine* engine) noe
     structural_engine_ = engine;
 }
 
+void OpenAIProxy::set_prompt_rewriter(IPromptRewriter* rewriter) noexcept {
+    rewriter_ = rewriter;
+}
+
 int OpenAIProxy::bind_to_port(const std::string& host, int port) {
     // httplib 0.38 returns bool from bind_to_port; use bind_to_any_port for
     // ephemeral binding so we can discover the actually-chosen port (port=0).
@@ -301,6 +306,13 @@ void OpenAIProxy::install_routes() {
             sys_content = std::move(opt.system_message);
         } else if (!retrieved.empty()) {
             sys_content = build_context_block(retrieved, config_.max_context_chars);
+        }
+        if (rewriter_ && !sys_content.empty()) {
+            try {
+                sys_content = rewriter_->rewrite(sys_content, config_.max_context_chars);
+            } catch (...) {
+                // Rewriter failures are non-fatal: keep the pre-rewrite block.
+            }
         }
         if (!sys_content.empty()) {
             json sys_msg = {{"role", "system"}, {"content", sys_content}};

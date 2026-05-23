@@ -42,6 +42,16 @@ struct Config {
     bool symbol_graph_enabled = false;
     bool graph_expansion_enabled = true;       // requires symbol_graph_enabled
     bool structural_fast_path_enabled = true;  // requires symbol_graph_enabled
+
+    // --- Phase 5: prompt rewriter / context compression (all optional) ---
+    bool prompt_rewriter_enabled = false;
+    /// One of: "heuristic" (always available) or "llama-cpp" (requires
+    /// the LLM_PREPROCESSOR_WITH_LLAMA_CPP build flag).
+    std::string prompt_rewriter_kind = "heuristic";
+    /// Soft char cap passed to the rewriter (0 = inherit max_context_chars).
+    std::size_t prompt_rewriter_max_chars = 0;
+    /// Path to a .gguf model file when prompt_rewriter_kind == "llama-cpp".
+    std::string llama_model_path;
 };
 
 class ConfigLoader {

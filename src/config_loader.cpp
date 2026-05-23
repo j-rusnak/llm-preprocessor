@@ -101,6 +101,15 @@ Config ConfigLoader::load(const std::string& filepath) {
     config.structural_fast_path_enabled = j.value("structural_fast_path_enabled",
                                                   config.structural_fast_path_enabled);
 
+    // --- Phase 5 fields (all optional). ---
+    config.prompt_rewriter_enabled = j.value("prompt_rewriter_enabled",
+                                             config.prompt_rewriter_enabled);
+    config.prompt_rewriter_kind = j.value("prompt_rewriter_kind",
+                                          config.prompt_rewriter_kind);
+    config.prompt_rewriter_max_chars = j.value("prompt_rewriter_max_chars",
+                                               config.prompt_rewriter_max_chars);
+    config.llama_model_path = j.value("llama_model_path", config.llama_model_path);
+
     if (j.contains("intents") && j["intents"].is_array()) {
         for (const auto& intent : j["intents"]) {
             if (!intent.contains("name")) {

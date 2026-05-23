@@ -16,6 +16,7 @@ class PromptCache;
 class ProxyMetrics;
 class ILLMTokenizer;
 class PromptOptimizer;
+class IPromptRewriter;
 class SymbolGraph;
 class StructuralQueryEngine;
 
@@ -87,6 +88,11 @@ public:
     /// (zero-LLM fast path). Caller owns; pass `nullptr` to detach.
     void set_structural_query_engine(StructuralQueryEngine* engine) noexcept;
 
+    /// Install a Phase 5 prompt rewriter. Applied to the assembled system
+    /// context block immediately before it is attached to the upstream
+    /// payload. Caller owns; pass `nullptr` to disable.
+    void set_prompt_rewriter(IPromptRewriter* rewriter) noexcept;
+
     /// Bind to `host:port` without blocking. Returns the actually-bound port
     /// (useful when `port == 0` to let the OS pick one). Throws if bind fails.
     int bind_to_port(const std::string& host, int port);
@@ -112,6 +118,7 @@ private:
     PromptOptimizer* optimiser_ = nullptr;
     SymbolGraph* symbol_graph_ = nullptr;
     StructuralQueryEngine* structural_engine_ = nullptr;
+    IPromptRewriter* rewriter_ = nullptr;
     std::unique_ptr<httplib::Server> server_;
 };
 
