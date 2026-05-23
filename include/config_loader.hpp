@@ -37,6 +37,11 @@ struct Config {
     bool prompt_optimizer_enabled = false;
     std::string prompt_templates_path;  // empty = use built-in defaults
     bool include_project_card = true;
+
+    // --- Phase 3: symbol graph + structural fast path (all optional) ---
+    bool symbol_graph_enabled = false;
+    bool graph_expansion_enabled = true;       // requires symbol_graph_enabled
+    bool structural_fast_path_enabled = true;  // requires symbol_graph_enabled
 };
 
 class ConfigLoader {

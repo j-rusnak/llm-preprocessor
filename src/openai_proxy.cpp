@@ -1,13 +1,17 @@
 #include "openai_proxy.hpp"
 
+#include "graph_aware_retriever.hpp"
 #include "llm_tokenizer.hpp"
 #include "prompt_cache.hpp"
 #include "prompt_optimizer.hpp"
 #include "proxy_metrics.hpp"
 #include "repo_index.hpp"
+#include "structural_query_engine.hpp"
+#include "symbol_graph.hpp"
 #include "text_sanitizer.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <sstream>
 #include <stdexcept>
@@ -151,6 +155,14 @@ void OpenAIProxy::set_prompt_optimizer(PromptOptimizer* optimiser) noexcept {
     optimiser_ = optimiser;
 }
 
+void OpenAIProxy::set_symbol_graph(SymbolGraph* graph) noexcept {
+    symbol_graph_ = graph;
+}
+
+void OpenAIProxy::set_structural_query_engine(StructuralQueryEngine* engine) noexcept {
+    structural_engine_ = engine;
+}
+
 int OpenAIProxy::bind_to_port(const std::string& host, int port) {
     // httplib 0.38 returns bool from bind_to_port; use bind_to_any_port for
     // ephemeral binding so we can discover the actually-chosen port (port=0).
@@ -216,6 +228,38 @@ void OpenAIProxy::install_routes() {
         const std::string model = body.value("model", std::string{"unknown"});
         std::string user_msg = TextSanitizer::sanitize(last_user_message(body["messages"]));
 
+        // Phase 3: zero-LLM fast path for purely structural questions.
+        if (structural_engine_ && !user_msg.empty()) {
+            try {
+                auto answer = structural_engine_->try_answer(user_msg);
+                if (answer) {
+                    metrics_.on_cache_hit(); // counts as an upstream-avoided hit
+                    auto now = std::chrono::system_clock::now().time_since_epoch();
+                    long long ts = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+                    json synthetic = {
+                        {"id", std::string("local-structural-") + std::to_string(ts)},
+                        {"object", "chat.completion"},
+                        {"created", ts},
+                        {"model", model},
+                        {"choices", json::array({
+                            json{{"index", 0},
+                                 {"message", json{{"role", "assistant"},
+                                                  {"content", *answer}}},
+                                 {"finish_reason", "stop"}}
+                        })},
+                        {"usage", json{{"prompt_tokens", 0},
+                                       {"completion_tokens", 0},
+                                       {"total_tokens", 0}}},
+                        {"x_preprocessor", json{{"source", "structural_query_engine"}}}
+                    };
+                    res.set_content(synthetic.dump(), "application/json");
+                    return;
+                }
+            } catch (const std::exception&) {
+                // Fast-path failures are non-fatal: fall through to normal flow.
+            }
+        }
+
         // Retrieval.
         std::vector<RetrievedChunk> retrieved;
         if (!user_msg.empty()) {
@@ -224,6 +268,15 @@ void OpenAIProxy::install_routes() {
             } catch (const std::exception&) {
                 // Retrieval failures are non-fatal: forward without context.
                 retrieved.clear();
+            }
+        }
+
+        // Phase 3: optional graph-aware expansion of retrieval results.
+        if (symbol_graph_ && !retrieved.empty()) {
+            try {
+                retrieved = expand_with_graph(retrieved, *symbol_graph_, index_);
+            } catch (const std::exception&) {
+                // Expansion failures are non-fatal.
             }
         }
 

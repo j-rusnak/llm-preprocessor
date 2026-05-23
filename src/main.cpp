@@ -14,6 +14,8 @@
 #include "prompt_templates.hpp"
 #include "proxy_metrics.hpp"
 #include "repo_index.hpp"
+#include "structural_query_engine.hpp"
+#include "symbol_graph.hpp"
 #include "text_sanitizer.hpp"
 #include "tokenizer.hpp"
 
@@ -57,11 +59,26 @@ static int run_serve(const preprocessor::Config& config) {
     idx_cfg.embedding_dim = config.embedding_dim;
     preprocessor::RepoIndex index(embedder, chunker, idx_cfg);
 
+    // Phase 3: optional symbol graph. Attach BEFORE index_path so the graph
+    // is populated as part of the initial walk.
+    std::unique_ptr<preprocessor::SymbolGraph> symbol_graph;
+    std::unique_ptr<preprocessor::RegexSymbolExtractor> symbol_extractor;
+    if (config.symbol_graph_enabled) {
+        symbol_graph = std::make_unique<preprocessor::SymbolGraph>();
+        symbol_extractor = std::make_unique<preprocessor::RegexSymbolExtractor>();
+        index.attach_symbol_graph(symbol_graph.get(), symbol_extractor.get());
+    }
+
     if (!config.repo_root.empty()) {
         std::cout << "[INFO] Indexing repo: " << config.repo_root << "\n";
         index.index_path(config.repo_root);
         std::cout << "[INFO] Indexed " << index.file_count() << " files / "
                   << index.chunk_count() << " chunks\n";
+        if (symbol_graph) {
+            std::cout << "[INFO] Symbol graph: "
+                      << symbol_graph->definition_count() << " defs / "
+                      << symbol_graph->reference_count() << " refs\n";
+        }
     }
 
     preprocessor::PromptCache cache(config.cache_db_path);
@@ -99,6 +116,19 @@ static int run_serve(const preprocessor::Config& config) {
                   << (config.prompt_templates_path.empty() ? "built-in"
                                                            : config.prompt_templates_path)
                   << ")\n";
+    }
+
+    // Phase 3: wire graph expansion + structural fast path.
+    std::unique_ptr<preprocessor::StructuralQueryEngine> structural;
+    if (symbol_graph && config.graph_expansion_enabled) {
+        proxy.set_symbol_graph(symbol_graph.get());
+        std::cout << "[INFO] Graph-aware retrieval expansion enabled\n";
+    }
+    if (symbol_graph && config.structural_fast_path_enabled) {
+        structural = std::make_unique<preprocessor::StructuralQueryEngine>(
+            *symbol_graph, index);
+        proxy.set_structural_query_engine(structural.get());
+        std::cout << "[INFO] Structural query fast path enabled\n";
     }
 
     std::cout << "[INFO] Proxy listening on http://" << config.proxy_host << ":"

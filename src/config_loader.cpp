@@ -93,6 +93,14 @@ Config ConfigLoader::load(const std::string& filepath) {
     config.include_project_card = j.value("include_project_card",
                                           config.include_project_card);
 
+    // --- Phase 3 fields (all optional). ---
+    config.symbol_graph_enabled = j.value("symbol_graph_enabled",
+                                          config.symbol_graph_enabled);
+    config.graph_expansion_enabled = j.value("graph_expansion_enabled",
+                                             config.graph_expansion_enabled);
+    config.structural_fast_path_enabled = j.value("structural_fast_path_enabled",
+                                                  config.structural_fast_path_enabled);
+
     if (j.contains("intents") && j["intents"].is_array()) {
         for (const auto& intent : j["intents"]) {
             if (!intent.contains("name")) {

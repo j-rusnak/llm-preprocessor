@@ -41,9 +41,21 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   message rewriter wired into `OpenAIProxy::set_prompt_optimizer`), new
   config keys `prompt_optimizer_enabled` / `prompt_templates_path` /
   `include_project_card`. Dependency added: `inja` (`pantor::inja`).
-- **Phase 3 (next):** Symbol graph (tree-sitter + clangd) with graph-aware expansion;
-  zero-LLM fast path for structural queries.
-- **Phase 4:** MCP server mode + VS Code extension; single-binary distribution.
+- **Phase 3 (DONE):** Symbol graph + zero-LLM fast path -
+  `SymbolGraph` (thread-safe defs/refs store with `neighbors_of` 1-hop
+  expansion), `ISymbolExtractor` + `RegexSymbolExtractor` (comment +
+  string stripping, reserved-word filtering, multi-language patterns;
+  tree-sitter slots in behind the same interface later), `RepoIndex`
+  hooks (`attach_symbol_graph`, `try_get_chunk`, graph (re)population in
+  `index_file_locked` / `forget_file_locked`), `expand_with_graph`
+  retrieval expander (decayed neighbour scores), `StructuralQueryEngine`
+  zero-LLM fast path (definition / callers / functions-in-file / repo
+  stats), `OpenAIProxy` wiring (`set_symbol_graph`,
+  `set_structural_query_engine`; fast-path runs before retrieval, graph
+  expansion runs before cache-key computation). New config keys
+  `symbol_graph_enabled`, `graph_expansion_enabled`,
+  `structural_fast_path_enabled`. No new vcpkg deps.
+- **Phase 4 (next):** MCP server mode + VS Code extension; single-binary distribution.
 - **Phase 5:** Optional local small-LLM prompt rewriter via `llama.cpp`.
 
 # Tech Stack & Build System
