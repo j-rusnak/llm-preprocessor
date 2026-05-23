@@ -40,7 +40,8 @@ static void print_help() {
               << "  --help      Show this help message and exit\n"
               << "  --version   Show version information and exit\n"
               << "  --serve     Run the OpenAI-compatible HTTP proxy\n"
-              << "  --mcp       Run as an MCP server over stdio (JSON-RPC)\n\n"
+              << "  --mcp       Run as an MCP server over stdio (JSON-RPC)\n"
+              << "  --health    Self-check (config + model files); exits 0 if healthy\n\n"
               << "Arguments:\n"
               << "  config_path  Path to JSON config file (default: config.json)\n";
 }
@@ -221,6 +222,7 @@ static int run_mcp(const preprocessor::Config& config) {
 int main(int argc, char* argv[]) {
     bool serve_mode = false;
     bool mcp_mode = false;
+    bool health_mode = false;
     std::string config_path = "config.json";
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
@@ -239,6 +241,10 @@ int main(int argc, char* argv[]) {
             mcp_mode = true;
             continue;
         }
+        if (std::strcmp(argv[i], "--health") == 0) {
+            health_mode = true;
+            continue;
+        }
         config_path = argv[i];
     }
 
@@ -248,6 +254,26 @@ int main(int argc, char* argv[]) {
     try {
         preprocessor::Config config = preprocessor::ConfigLoader::load(config_path);
 
+        if (health_mode) {
+            // Phase 12 self-check: verify config loads + ONNX assets exist.
+            bool ok = true;
+            std::cout << "config: OK (" << config_path << ")\n";
+            if (std::filesystem::exists(config.model_path)) {
+                std::cout << "model: OK (" << config.model_path << ")\n";
+            } else {
+                std::cout << "model: MISSING (" << config.model_path << ")\n";
+                ok = false;
+            }
+            if (std::filesystem::exists(config.vocab_path)) {
+                std::cout << "vocab: OK (" << config.vocab_path << ")\n";
+            } else {
+                std::cout << "vocab: MISSING (" << config.vocab_path << ")\n";
+                ok = false;
+            }
+            std::cout << (ok ? "HEALTHY" : "DEGRADED") << "\n";
+            curl_global_cleanup();
+            return ok ? 0 : 1;
+        }
         if (serve_mode) {
             exit_code = run_serve(config);
             curl_global_cleanup();

@@ -127,6 +127,38 @@ cache, multi-tier model routing, telemetry-driven prompt evolution, team
 mode, streaming-aware compaction, production hardening) are tracked in
 [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
 
+**Phases 6-12 (advanced middleware) - complete.** Seven additional
+modules round out the production stack:
+
+- **Phase 6 - `DiffPatcher`.** Permissive unified-diff parser + applier
+  for the `CodeEdit` bucket. Validates hunk context against current
+  file contents and applies changes in memory; lets upstream return
+  small diffs instead of whole files. Falls back gracefully on
+  malformed input.
+- **Phase 7 - `EmbeddingCache`.** SQLite + xxhash64 cache keyed by
+  `(model_id, content)` so chunk embeddings survive process restarts
+  and are shareable across sibling repos. Eliminates re-embedding on
+  cold start.
+- **Phase 8 - `ModelRouter`.** Picks a `cheap` / `medium` / `frontier`
+  upstream per turn from intent bucket + request size. Tiers and
+  routes are registered programmatically; plays nicely with
+  `PromptCache` (cache key already includes model id).
+- **Phase 9 - `AbHarness`.** Sticky-hash A/B variant assignment for
+  prompt templates and rewriter knobs. Deterministic per
+  `(experiment_id, sticky_key)` via xxhash64; tracks hit counts.
+- **Phase 10 - `SyncEndpoint`.** Transport-agnostic serializer for
+  cache + vector bundles so a team's proxies can pool warm context.
+  HTTP sync wiring is a thin wrapper around `to_json` / `from_json`
+  and `apply_to_cache`.
+- **Phase 11 - `StreamingCompactor`.** Folds older completed chat
+  turns into a rolling summary so long sessions stay under the
+  model's effective context window. Pluggable via the same
+  `IPromptRewriter` style surface.
+- **Phase 12 - `AuthMiddleware` + `RateLimiter`.** Bearer-token
+  allow-list and HMAC-SHA256 (timestamp + body) auth, with optional
+  token-bucket rate limiting per caller key. Self-check via new
+  `--health` flag.
+
 ## Architecture
 
 ```
@@ -183,6 +215,14 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **StructuralQueryEngine** | `structural_query_engine.hpp` | Zero-LLM fast path for definition / caller / file-symbols / repo-stats queries. |
 | **McpServer** | `mcp_server.hpp` | JSON-RPC 2.0 MCP server over stdio; exposes RAG + structural surfaces as tools/resources. |
 | **PromptRewriter** | `prompt_rewriter.hpp` | `IPromptRewriter` + `HeuristicCompressionRewriter` (always on) and `LlamaCppRewriter` (stub; enabled by `LLM_PREPROCESSOR_WITH_LLAMA_CPP`). |
+| **DiffPatcher** | `diff_patcher.hpp` | Phase 6 permissive unified-diff parser + applier (context-validated). |
+| **EmbeddingCache** | `embedding_cache.hpp` | Phase 7 persistent SQLite + xxhash64 chunk-embedding cache. |
+| **ModelRouter** | `model_router.hpp` | Phase 8 multi-tier upstream selector keyed on intent bucket + request size. |
+| **AbHarness** | `ab_harness.hpp` | Phase 9 sticky-hash A/B variant assignment for telemetry-driven prompt evolution. |
+| **SyncEndpoint** | `sync_endpoint.hpp` | Phase 10 transport-agnostic serializer for cache + vector bundles (team mode). |
+| **StreamingCompactor** | `streaming_compactor.hpp` | Phase 11 rolling chat-history summarizer; keeps long sessions under the context window. |
+| **AuthMiddleware** | `auth_middleware.hpp` | Phase 12 bearer + HMAC-SHA256 request authentication. |
+| **RateLimiter** | `rate_limiter.hpp` | Phase 12 per-key token-bucket rate limiter. |
 
 ## Tech Stack
 

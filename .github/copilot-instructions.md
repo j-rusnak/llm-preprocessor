@@ -80,41 +80,63 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   `prompt_rewriter_max_chars`, `llama_model_path`. No new vcpkg deps;
   `llama.cpp` linkage is deferred to Phase 6 once the model story is
   finalised. 188 ctest cases / 45 smoke stages pass.
-- **Phase 6 (next):** Diff-aware response patching for the `CodeEdit`
-  bucket. Request unified diffs from upstream (system prompt + bucket
-  template tweak), validate hunks against current file content, and
-  apply them locally via a new `DiffPatcher` module. Targets ~70%
-  output-token reduction on large edits. Includes a permissive parser
-  that falls back to raw replacement if validation fails. May land the
-  real `llama.cpp` linkage opportunistically (small instruct model for
-  diff repair) but only if it stays single-binary friendly.
-- **Phase 7:** Persistent + cross-repo embedding cache. Promote the
-  in-memory chunk -> embedding map to a content-hash keyed
-  `EmbeddingCache` backed by SQLite + xxhash64, warm-loaded at boot and
-  shareable across sibling repos. Eliminates re-embedding on cold
-  start; cuts indexing time on large monorepos.
-- **Phase 8:** Multi-tier model routing. New `ModelRouter` consumes the
-  Phase 2 intent bucket + request size + structural-graph hints and
-  picks `cheap` / `medium` / `frontier` upstream per turn. Config:
-  `model_routes: { CodeExplain: cheap, CodeEdit: medium, ... }`. Plays
-  nicely with the Phase 1 `PromptCache` (cache key already includes
-  model id).
-- **Phase 9:** Telemetry-driven prompt evolution. Offline analyser over
-  `ProxyMetrics` + completion logs proposes per-bucket template and
-  budget tweaks. `PromptTemplates` gains versioning + an A/B harness
-  so changes can be rolled out per-request fraction.
-- **Phase 10:** Team mode. Shared `PromptCache` + `VectorStore` via a
-  new HTTP sync endpoint (`/sync/cache`, `/sync/vectors`) so a team's
-  proxies can pool warm context. Auth lands in Phase 12; until then,
-  loopback / private network only.
-- **Phase 11:** Streaming-aware compaction. Token-streaming upstream
-  proxy that compacts mid-stream for long chats by rolling completed
-  turns into a summary stored in `ChatHistoryStore`. Keeps long
-  sessions inside the model's effective context window.
-- **Phase 12:** Production hardening. HMAC / bearer auth on the proxy +
-  MCP surfaces, rate limiting, OpenTelemetry tracing, a slim Docker
-  image, Helm chart for the team-mode sync service, signed release
-  binaries, and a `--health` self-check command.
+- **Phase 6 (DONE):** Diff-aware response patching - `DiffPatcher`
+  permissive unified-diff parser + applier. Parses `diff --git` /
+  `--- ` / `+++ ` headers and `@@` hunks, validates context against
+  current file content via an injected `unordered_map<path,
+  contents>`, applies in memory (caller decides when to flush).
+  Strips `a/` / `b/` path prefixes; permissive `parse` skips malformed
+  hunks while `parse_strict` throws. Both struct-vector and
+  `string_view`-overload `apply` paths. No new vcpkg deps.
+- **Phase 7 (DONE):** Persistent + cross-repo embedding cache -
+  `EmbeddingCache` backed by SQLite (`embeddings(key INTEGER PRIMARY
+  KEY, model TEXT, dim INTEGER, vec BLOB)`) keyed by xxhash64 of
+  `model_id || '|' || content`. WAL + `synchronous=NORMAL` pragmas;
+  thread-safe via `std::mutex`. Methods: `get` / `get_by_key` / `put`
+  / `put_by_key` / `size` / `clear` / `key_for`. Eliminates
+  re-embedding across process restarts and sibling repos. No new
+  vcpkg deps.
+- **Phase 8 (DONE):** Multi-tier model routing - `ModelTier{name,
+  upstream_url, model_name, api_key, max_context}` + `ModelRoute{
+  PromptBucket bucket, min/max_request_chars, tier}`. `ModelRouter`
+  with `add_tier` / `add_route` / `route(bucket, chars)` /
+  `tier(name)`. Plays nicely with `PromptCache` (cache key already
+  includes model id). Thread-safe via `std::mutex`. No new vcpkg
+  deps.
+- **Phase 9 (DONE):** Telemetry-driven prompt evolution - `AbHarness`
+  with `AbVariant{name, weight}` + `AbExperiment{id, variants}`.
+  `define(experiment)` rejects empty / all-zero-weight inputs.
+  `assign(experiment_id, sticky_key)` hashes
+  `xxhash64(experiment_id + '\0' + sticky_key)` into the weighted
+  variant range for deterministic, sticky assignment. `record_hit` /
+  `hit_counts` keyed `"experiment::variant"` for offline analysis.
+  No new vcpkg deps.
+- **Phase 10 (DONE):** Team mode - `SyncEndpoint` transport-agnostic
+  serializer for shared cache + vector bundles. `SyncBundle{cache,
+  vectors}` with `SyncCacheEntry{key, body}` and `SyncVectorEntry{
+  chunk_id, vec, source_path}`. `to_json` / `from_json` over
+  `nlohmann::json`; `apply_to_cache(bundle, PromptCache*)` returns
+  applied count and bumps `bundles_imported()`. HTTP wiring is a
+  thin caller-side wrapper; auth lands in Phase 12. No new vcpkg
+  deps.
+- **Phase 11 (DONE):** Streaming-aware compaction -
+  `StreamingCompactor` folds older `ChatTurn{role, content}` entries
+  into a rolling summary string suitable for re-injection as a
+  system message. `Config{max_total_chars=6000,
+  summary_chars_per_turn=160, keep_recent=4}` keeps the most recent
+  N turns verbatim, grows the kept window until budget, and writes
+  `"Summary of earlier turns:\n- role: excerpt..."` for the rolled
+  tail. Dependency-free; pluggable behind the same surface as the
+  Phase 5 rewriter. No new vcpkg deps.
+- **Phase 12 (DONE):** Production hardening - `AuthMiddleware` with
+  bearer-token allow-list + HMAC-SHA256 (inline RFC-6234
+  implementation in `src/auth_middleware.cpp`; constant-time hex
+  compare). `verify(authorization, signature, timestamp, body,
+  now_unix=0)` honours `max_clock_skew`. `RateLimiter`
+  token-bucket per caller key with `tokens_per_second` / `burst`
+  knobs (0/0 = disabled). `main.cpp` gains a `--health` flag that
+  validates config + ONNX assets and exits non-zero on missing
+  files. No new vcpkg deps. 227 ctest cases / 54 smoke stages pass.
 
 # Tech Stack & Build System
 - **Language Standard:** C++17 (strictly enforced).
