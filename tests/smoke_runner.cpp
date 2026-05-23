@@ -31,6 +31,10 @@
 #include "project_card.hpp"
 #include "prompt_optimizer.hpp"
 #include "prompt_templates.hpp"
+// Phase 3:
+#include "graph_aware_retriever.hpp"
+#include "structural_query_engine.hpp"
+#include "symbol_graph.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -478,6 +482,103 @@ void stage_prompt_optimizer(Stats& s, bool) {
 
 } // namespace
 
+namespace {
+
+void stage_symbol_graph(Stats& s, bool) {
+    std::cout << "[symbol_graph]\n";
+    try {
+        preprocessor::SymbolGraph g;
+        preprocessor::RegexSymbolExtractor ex;
+        preprocessor::CodeChunk defc;
+        defc.id = 1; defc.file_path = "src/sg.cpp"; defc.start_line = 1; defc.end_line = 1;
+        defc.text = "void target(){}\n";
+        preprocessor::CodeChunk callc;
+        callc.id = 2; callc.file_path = "src/sg2.cpp"; callc.start_line = 1; callc.end_line = 1;
+        callc.text = "void caller(){ target(); }\n";
+        g.update_chunk(defc, ex.extract(defc));
+        g.update_chunk(callc, ex.extract(callc));
+        report(s, "extractor finds defs", g.definition_count() >= 2);
+        report(s, "extractor finds refs", g.reference_count() >= 1);
+        report(s, "definition lookup", !g.find_definitions("target").empty());
+        report(s, "reference lookup", !g.find_references("target").empty());
+        g.remove_file("src/sg.cpp");
+        g.remove_file("src/sg2.cpp");
+        report(s, "remove_file empties graph", g.definition_count() == 0 && g.reference_count() == 0);
+    } catch (const std::exception& e) {
+        report(s, "symbol_graph stage", false, e.what());
+    }
+}
+
+void stage_graph_expansion(Stats& s, bool) {
+    std::cout << "[graph_expansion]\n";
+    try {
+        auto emb = std::make_shared<p1::HashEmbedder>(16);
+        auto chunker = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+        preprocessor::RepoIndexConfig cfg;
+        cfg.embedding_dim = 16;
+        cfg.watch_for_changes = false;
+        preprocessor::RepoIndex index(emb, chunker, cfg);
+        preprocessor::SymbolGraph graph;
+        preprocessor::RegexSymbolExtractor ex;
+        index.attach_symbol_graph(&graph, &ex);
+
+        auto tmp = fs::temp_directory_path() / ("sg_smoke_" + std::to_string(
+                       std::chrono::steady_clock::now().time_since_epoch().count()));
+        fs::create_directories(tmp);
+        std::ofstream(tmp / "h.cpp") << "void shared_helper(){}\n";
+        std::ofstream(tmp / "c.cpp") << "void caller(){ shared_helper(); }\n";
+        index.index_path(tmp.string());
+
+        auto seeds = index.search("caller", 1);
+        report(s, "seeds non-empty", !seeds.empty());
+        auto expanded = preprocessor::expand_with_graph(seeds, graph, index);
+        bool got_helper = false;
+        for (const auto& r : expanded)
+            if (r.chunk.file_path.find("h.cpp") != std::string::npos) got_helper = true;
+        report(s, "graph expansion appends neighbour chunk", got_helper);
+        std::error_code ec; fs::remove_all(tmp, ec);
+    } catch (const std::exception& e) {
+        report(s, "graph_expansion stage", false, e.what());
+    }
+}
+
+void stage_structural_query(Stats& s, bool) {
+    std::cout << "[structural_query]\n";
+    try {
+        auto emb = std::make_shared<p1::HashEmbedder>(16);
+        auto chunker = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+        preprocessor::RepoIndexConfig cfg;
+        cfg.embedding_dim = 16;
+        cfg.watch_for_changes = false;
+        preprocessor::RepoIndex index(emb, chunker, cfg);
+        preprocessor::SymbolGraph graph;
+        preprocessor::RegexSymbolExtractor ex;
+        index.attach_symbol_graph(&graph, &ex);
+
+        auto tmp = fs::temp_directory_path() / ("sq_smoke_" + std::to_string(
+                       std::chrono::steady_clock::now().time_since_epoch().count()));
+        fs::create_directories(tmp);
+        std::ofstream(tmp / "math.cpp")
+            << "int add(int a,int b){return a+b;}\nint caller(){return add(1,2);}\n";
+        index.index_path(tmp.string());
+
+        preprocessor::StructuralQueryEngine eng(graph, index);
+        auto def = eng.try_answer("where is `add`?");
+        report(s, "definition fast-path returns an answer", def.has_value());
+        auto cal = eng.try_answer("what calls `add`");
+        report(s, "callers fast-path returns an answer", cal.has_value());
+        auto stats = eng.try_answer("how many chunks are in the repo?");
+        report(s, "repo stats fast-path returns an answer", stats.has_value());
+        auto none = eng.try_answer("write me a haiku about pointers");
+        report(s, "freeform message returns nullopt", !none.has_value());
+        std::error_code ec; fs::remove_all(tmp, ec);
+    } catch (const std::exception& e) {
+        report(s, "structural_query stage", false, e.what());
+    }
+}
+
+} // namespace
+
 int main(int argc, char** argv) {
     bool verbose = false;
     for (int i = 1; i < argc; ++i) {
@@ -486,7 +587,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 + Phase 2 Smoke Runner ===\n\n";
+    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 + Phase 2 + Phase 3 Smoke Runner ===\n\n";
 
     Stats s;
     stage_chunker(s, verbose);
@@ -502,6 +603,9 @@ int main(int argc, char** argv) {
     stage_intent_classifier(s, verbose);
     stage_project_card(s, verbose);
     stage_prompt_optimizer(s, verbose);
+    stage_symbol_graph(s, verbose);
+    stage_graph_expansion(s, verbose);
+    stage_structural_query(s, verbose);
 
     std::cout << "\nSummary: " << s.passed << " passed, " << s.failed << " failed.\n";
     return s.failed == 0 ? 0 : 1;

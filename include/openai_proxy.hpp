@@ -16,6 +16,8 @@ class PromptCache;
 class ProxyMetrics;
 class ILLMTokenizer;
 class PromptOptimizer;
+class SymbolGraph;
+class StructuralQueryEngine;
 
 /// Configuration for `OpenAIProxy`.
 struct OpenAIProxyConfig {
@@ -74,6 +76,17 @@ public:
     /// Phase 1 plain-context behaviour.
     void set_prompt_optimizer(PromptOptimizer* optimiser) noexcept;
 
+    /// Install a Phase 3 symbol graph. When attached, retrieval results are
+    /// expanded with one hop of graph-aware neighbours before being injected
+    /// as context. Caller owns; pass `nullptr` to detach.
+    void set_symbol_graph(SymbolGraph* graph) noexcept;
+
+    /// Install a Phase 3 structural query engine. When attached, the proxy
+    /// consults it before doing retrieval; on a successful answer the request
+    /// is served as a synthetic completion without forwarding upstream
+    /// (zero-LLM fast path). Caller owns; pass `nullptr` to detach.
+    void set_structural_query_engine(StructuralQueryEngine* engine) noexcept;
+
     /// Bind to `host:port` without blocking. Returns the actually-bound port
     /// (useful when `port == 0` to let the OS pick one). Throws if bind fails.
     int bind_to_port(const std::string& host, int port);
@@ -97,6 +110,8 @@ private:
     ILLMTokenizer& tokenizer_;
     OpenAIProxyConfig config_;
     PromptOptimizer* optimiser_ = nullptr;
+    SymbolGraph* symbol_graph_ = nullptr;
+    StructuralQueryEngine* structural_engine_ = nullptr;
     std::unique_ptr<httplib::Server> server_;
 };
 

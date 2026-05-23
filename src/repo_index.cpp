@@ -4,6 +4,7 @@
 #include "file_watcher.hpp"
 #include "hybrid_retriever.hpp"
 #include "i_embedding_engine.hpp"
+#include "symbol_graph.hpp"
 #include "vector_store.hpp"
 
 #include <algorithm>
@@ -161,6 +162,10 @@ void RepoIndex::index_file_locked(const std::string& file_path) {
         vectors_->add(chunks[i].id, embeds[i]);
         keywords_->add(chunks[i].id, chunks[i].text);
         bucket.insert(chunks[i].id);
+        if (symbol_graph_ && symbol_extractor_) {
+            symbol_graph_->update_chunk(chunks[i],
+                                        symbol_extractor_->extract(chunks[i]));
+        }
         chunks_by_id_.emplace(chunks[i].id, std::move(chunks[i]));
     }
 }
@@ -184,6 +189,7 @@ void RepoIndex::forget_file_locked(const std::string& file_path) {
         chunks_by_id_.erase(id);
     }
     ids_by_file_.erase(it);
+    if (symbol_graph_) symbol_graph_->remove_file(file_path);
 }
 
 std::vector<RetrievedChunk> RepoIndex::search(const std::string& query, std::size_t k) const {
@@ -226,6 +232,21 @@ std::vector<CodeChunk> RepoIndex::snapshot_chunks() const {
     out.reserve(chunks_by_id_.size());
     for (const auto& kv : chunks_by_id_) out.push_back(kv.second);
     return out;
+}
+
+bool RepoIndex::try_get_chunk(std::uint64_t id, CodeChunk& out) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = chunks_by_id_.find(id);
+    if (it == chunks_by_id_.end()) return false;
+    out = it->second;
+    return true;
+}
+
+void RepoIndex::attach_symbol_graph(SymbolGraph* graph,
+                                    ISymbolExtractor* extractor) noexcept {
+    std::lock_guard<std::mutex> lock(mu_);
+    symbol_graph_ = graph;
+    symbol_extractor_ = extractor;
 }
 
 } // namespace preprocessor

@@ -18,6 +18,8 @@ class VectorStore;
 class BM25Index;
 class FileWatcher;
 class HybridRetriever;
+class SymbolGraph;
+class ISymbolExtractor;
 
 /// One retrieved chunk hydrated with its original text + metadata.
 struct RetrievedChunk {
@@ -93,6 +95,17 @@ public:
     /// with `search()`; serialised against indexing mutators.
     std::vector<CodeChunk> snapshot_chunks() const;
 
+    /// Look up a single chunk by id. Returns `false` if unknown.
+    bool try_get_chunk(std::uint64_t id, CodeChunk& out) const;
+
+    /// Attach a Phase 3 symbol graph + extractor. Both pointers are
+    /// borrowed (caller owns; must outlive the index). When attached,
+    /// every (re)indexed chunk has its symbols extracted into the graph,
+    /// and forgetting a file removes its contributions. Pass `nullptr`
+    /// for either to detach.
+    void attach_symbol_graph(SymbolGraph* graph,
+                             ISymbolExtractor* extractor) noexcept;
+
 private:
     void index_file_locked(const std::string& file_path);
     void forget_file_locked(const std::string& file_path);
@@ -106,6 +119,9 @@ private:
     std::unique_ptr<BM25Index> keywords_;
     std::unique_ptr<HybridRetriever> retriever_;
     std::unique_ptr<FileWatcher> watcher_;
+
+    SymbolGraph* symbol_graph_ = nullptr;
+    ISymbolExtractor* symbol_extractor_ = nullptr;
 
     mutable std::mutex mu_;
     // id -> chunk metadata (text, file_path, lines, symbol).

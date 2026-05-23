@@ -77,6 +77,10 @@ add_library(preprocessor_lib
     src/intent_classifier.cpp
     src/prompt_templates.cpp
     src/prompt_optimizer.cpp
+    # Phase 3 modules:
+    src/symbol_graph.cpp
+    src/graph_aware_retriever.cpp
+    src/structural_query_engine.cpp
 )
 
 target_include_directories(preprocessor_lib PUBLIC
@@ -139,6 +143,10 @@ add_executable(preprocessor_tests
     tests/test_intent_classifier.cpp
     tests/test_prompt_templates.cpp
     tests/test_prompt_optimizer.cpp
+    # Phase 3 tests:
+    tests/test_symbol_graph.cpp
+    tests/test_graph_aware_retriever.cpp
+    tests/test_structural_query_engine.cpp
     # tests/test_embedding_engine.cpp
 )
 

@@ -63,6 +63,24 @@ now optimises prompts before sending them upstream:
   optionally injects the project card, and renders the bucket's template
   as the system message. Disabled = exact Phase 1 behaviour.
 
+**Phase 3 (Symbol graph + zero-LLM fast path) - complete.** The proxy now
+builds a lightweight symbol graph as it indexes the repo, and can answer
+purely structural questions without forwarding to the upstream LLM:
+
+- `SymbolGraph` - thread-safe definitions / references store keyed by
+  chunk id and file path, with one-hop neighbour expansion.
+- `ISymbolExtractor` + `RegexSymbolExtractor` - pluggable extractor
+  interface (tree-sitter slots in behind this in a future phase) plus a
+  regex-based default covering C/C++/Java/JS/Python/Rust/Go and C macros,
+  with comment/string stripping and reserved-word filtering.
+- `GraphAwareRetriever::expand_with_graph` - appends graph-reachable
+  neighbour chunks (decayed score) to the hybrid retrieval result before
+  context assembly.
+- `StructuralQueryEngine::try_answer` - zero-LLM fast path for queries
+  like "where is `Foo`", "what calls `bar`", "functions in `file.cpp`",
+  and "repo stats"; on a hit the proxy synthesises an OpenAI-compatible
+  completion locally and never touches the upstream.
+
 Upcoming phases (symbol graph / clangd-backed retrieval, MCP server +
 VS Code extension) are tracked in
 [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
@@ -118,6 +136,9 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **IntentClassifier** | `intent_classifier.hpp` | `IIntentClassifier` interface + `HeuristicIntentClassifier` for bucket routing. |
 | **PromptTemplates** | `prompt_templates.hpp` | `inja`-rendered, per-bucket prompt scaffolds; JSON-overridable. |
 | **PromptOptimizer** | `prompt_optimizer.hpp` | Toggleable prompt rewriter wiring classifier + templates + project card. |
+| **SymbolGraph** | `symbol_graph.hpp` | Defs/refs store + `ISymbolExtractor` + `RegexSymbolExtractor`; one-hop neighbour expansion. |
+| **GraphAwareRetriever** | `graph_aware_retriever.hpp` | `expand_with_graph` appends graph-reachable neighbour chunks to retrieval results. |
+| **StructuralQueryEngine** | `structural_query_engine.hpp` | Zero-LLM fast path for definition / caller / file-symbols / repo-stats queries. |
 
 ## Tech Stack
 
@@ -345,6 +366,9 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `prompt_optimizer_enabled` | Enable Phase 2 per-bucket prompt rewriting | `false` |
 | `prompt_templates_path` | Optional JSON file overriding bucket templates | *(empty)* |
 | `include_project_card` | Inject the `ProjectCard` summary into the system prompt | `true` |
+| `symbol_graph_enabled` | Build Phase 3 symbol graph during indexing | `false` |
+| `graph_expansion_enabled` | Append graph-reachable neighbour chunks to retrieval (requires `symbol_graph_enabled`) | `true` |
+| `structural_fast_path_enabled` | Answer structural queries locally without forwarding upstream (requires `symbol_graph_enabled`) | `true` |
 
 When `api_model` is set in config, payloads are emitted as complete API request bodies (`{model, messages, temperature, max_tokens}`). Without it, the old messages-only format is used.
 
