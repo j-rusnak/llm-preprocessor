@@ -41,6 +41,13 @@ Expected:
 (`INCLUDE`, `LIB`, `PATH`). VS Code's default integrated PowerShell is NOT a
 developer shell.
 
+### Option A — Start menu (easiest)
+
+Launch **"x64 Native Tools Command Prompt for VS 2022"** *or* **"Developer
+PowerShell for VS 2022"**, then `cd` to the repo.
+
+### Option B — Activate from PowerShell
+
 ```powershell
 $vsdev = & "C:\Program Files\Microsoft Visual Studio\Installer\vswhere.exe" `
     -latest -property installationPath
@@ -49,8 +56,20 @@ Enter-VsDevShell -VsInstallPath $vsdev -SkipAutomaticLocation `
     -DevCmdArguments "-arch=x64 -host_arch=x64"
 ```
 
-Symptom of a missing env: `fatal error C1083: Cannot open include file:
-'string'` / `'cstddef'` from gtest.h or any project header.
+### Option C — Activate from cmd.exe
+
+```cmd
+"C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+```
+
+Adjust the edition (`Enterprise` / `Professional` / `Community`) and year
+(`2022`) to match your install.
+
+**Symptom of a missing env:** `fatal error C1083: Cannot open include file:
+'string'` / `'cstddef'` / `'cstdint'` from gtest.h or any project header.
+If you see this, you skipped one of the steps above. PowerShell cmdlets like
+`$vsdev = ...` / `Enter-VsDevShell` do NOT work inside `cmd.exe` — use
+Option C there.
 
 ---
 
