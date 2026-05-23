@@ -223,6 +223,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **StreamingCompactor** | `streaming_compactor.hpp` | Phase 11 rolling chat-history summarizer; keeps long sessions under the context window. |
 | **AuthMiddleware** | `auth_middleware.hpp` | Phase 12 bearer + HMAC-SHA256 request authentication. |
 | **RateLimiter** | `rate_limiter.hpp` | Phase 12 per-key token-bucket rate limiter. |
+| **EffectivenessRunner** | `benchmarks/effectiveness_runner.cpp` | Standalone harness that measures cache speedup, rewriter compression, BM25 accuracy, A/B determinism, HMAC throughput, and rate-limit burst behaviour. Emits JSON for CI dashboards. |
 
 ## Tech Stack
 
@@ -362,6 +363,24 @@ Exit code is `0` on full pass, non-zero on any failure - safe to wire into CI.
 
 Latency / accuracy charts for the semantic router. See
 [Benchmarks & Visualizations](#benchmarks--visualizations).
+
+### 4. Effectiveness runner (Phase 5-12 quality gates)
+
+`benchmarks/effectiveness_runner.cpp` measures real, end-to-end effectiveness of
+every Phase 5-12 module without requiring the ONNX model. JSON to stdout,
+human-readable summary table to stderr.
+
+```powershell
+.\build\effectiveness_runner.exe > benchmarks\results\effectiveness.json
+```
+
+The matching gtest suite (`Effectiveness_*` in `tests/test_effectiveness.cpp`)
+locks in minimum thresholds (cache speedup, rewriter char/token reduction,
+BM25 top-1 correctness, A/B sticky + balance, rate-limiter burst, ...) so any
+regression breaks `ctest`.
+
+A complete end-to-end testing & feature-usage walkthrough lives in
+[docs/TESTING.md](docs/TESTING.md).
 
 ## Configuration
 
