@@ -97,7 +97,34 @@ the RAG stack directly:
   that registers the binary as a local MCP server with VS Code's
   Language Model host (VS Code 1.99+).
 
-Upcoming phases (local small-LLM prompt rewriter via `llama.cpp`) are tracked in
+**Phase 5 (prompt rewriter / context compressor) - complete.** The proxy
+now post-processes the assembled system context immediately before
+forwarding upstream:
+
+- `IPromptRewriter` interface with two implementations:
+  - `HeuristicCompressionRewriter` (always on, dependency-free) - strips
+    `//` / `#` line comments and `/* ... */` block comments while
+    preserving string literals **and** C preprocessor directives,
+    collapses runs of blank lines, dedupes adjacent duplicates, trims
+    trailing whitespace, and applies an optional hard char cap with a
+    `... [truncated]` marker.
+  - `LlamaCppRewriter` (stub) gated behind the CMake option
+    `LLM_PREPROCESSOR_WITH_LLAMA_CPP` (default `OFF`). The interface,
+    config, and `is_available()` probe ship in this phase; the actual
+    `llama.cpp` linkage lands in Phase 6 once the model story is
+    finalised.
+- `OpenAIProxy::set_prompt_rewriter` runs after retrieval / template
+  rendering and before cache-key computation, so compressed context
+  participates in caching too. Failures are non-fatal (keeps the
+  uncompressed block).
+- New config keys: `prompt_rewriter_enabled` (default `false`),
+  `prompt_rewriter_kind` (`"heuristic"` or `"llama-cpp"`),
+  `prompt_rewriter_max_chars` (`0` = inherit `max_context_chars`),
+  `llama_model_path`.
+
+Upcoming phases (diff-aware response patching, persistent embedding
+cache, multi-tier model routing, telemetry-driven prompt evolution, team
+mode, streaming-aware compaction, production hardening) are tracked in
 [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
 
 ## Architecture
@@ -155,6 +182,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **GraphAwareRetriever** | `graph_aware_retriever.hpp` | `expand_with_graph` appends graph-reachable neighbour chunks to retrieval results. |
 | **StructuralQueryEngine** | `structural_query_engine.hpp` | Zero-LLM fast path for definition / caller / file-symbols / repo-stats queries. |
 | **McpServer** | `mcp_server.hpp` | JSON-RPC 2.0 MCP server over stdio; exposes RAG + structural surfaces as tools/resources. |
+| **PromptRewriter** | `prompt_rewriter.hpp` | `IPromptRewriter` + `HeuristicCompressionRewriter` (always on) and `LlamaCppRewriter` (stub; enabled by `LLM_PREPROCESSOR_WITH_LLAMA_CPP`). |
 
 ## Tech Stack
 
@@ -385,6 +413,10 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `symbol_graph_enabled` | Build Phase 3 symbol graph during indexing | `false` |
 | `graph_expansion_enabled` | Append graph-reachable neighbour chunks to retrieval (requires `symbol_graph_enabled`) | `true` |
 | `structural_fast_path_enabled` | Answer structural queries locally without forwarding upstream (requires `symbol_graph_enabled`) | `true` |
+| `prompt_rewriter_enabled` | Apply Phase 5 prompt rewriter to assembled context before forwarding | `false` |
+| `prompt_rewriter_kind` | `"heuristic"` (always available) or `"llama-cpp"` (requires `LLM_PREPROCESSOR_WITH_LLAMA_CPP`) | `"heuristic"` |
+| `prompt_rewriter_max_chars` | Soft char cap for the rewriter (`0` = inherit `max_context_chars`) | `0` |
+| `llama_model_path` | Path to a `.gguf` model when `prompt_rewriter_kind == "llama-cpp"` | — |
 
 When `api_model` is set in config, payloads are emitted as complete API request bodies (`{model, messages, temperature, max_tokens}`). Without it, the old messages-only format is used.
 

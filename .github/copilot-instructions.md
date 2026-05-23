@@ -65,7 +65,56 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   HTTP protocol and MCP. `vscode-extension/` is a minimal TypeScript
   shim that registers the binary with VS Code's Language Model host
   (1.99+). No new vcpkg deps.
-- **Phase 5 (next):** Optional local small-LLM prompt rewriter via `llama.cpp`.
+- **Phase 5 (DONE):** Prompt rewriter / context compressor -
+  `IPromptRewriter` interface, `HeuristicCompressionRewriter`
+  (always available, dependency-free: strips `//` / `#` line comments
+  and `/* ... */` blocks while preserving string literals and C
+  preprocessor directives, collapses blank-line runs, dedupes adjacent
+  lines, trims trailing whitespace, optional hard char cap with
+  `... [truncated]` marker), `LlamaCppRewriter` (stub gated behind
+  CMake option `LLM_PREPROCESSOR_WITH_LLAMA_CPP`, default OFF;
+  constructor throws when the flag is off). `OpenAIProxy` gains
+  `set_prompt_rewriter` and applies the rewriter to the assembled
+  system context immediately before the cache-key + upstream forward.
+  New config keys: `prompt_rewriter_enabled`, `prompt_rewriter_kind`,
+  `prompt_rewriter_max_chars`, `llama_model_path`. No new vcpkg deps;
+  `llama.cpp` linkage is deferred to Phase 6 once the model story is
+  finalised. 188 ctest cases / 45 smoke stages pass.
+- **Phase 6 (next):** Diff-aware response patching for the `CodeEdit`
+  bucket. Request unified diffs from upstream (system prompt + bucket
+  template tweak), validate hunks against current file content, and
+  apply them locally via a new `DiffPatcher` module. Targets ~70%
+  output-token reduction on large edits. Includes a permissive parser
+  that falls back to raw replacement if validation fails. May land the
+  real `llama.cpp` linkage opportunistically (small instruct model for
+  diff repair) but only if it stays single-binary friendly.
+- **Phase 7:** Persistent + cross-repo embedding cache. Promote the
+  in-memory chunk -> embedding map to a content-hash keyed
+  `EmbeddingCache` backed by SQLite + xxhash64, warm-loaded at boot and
+  shareable across sibling repos. Eliminates re-embedding on cold
+  start; cuts indexing time on large monorepos.
+- **Phase 8:** Multi-tier model routing. New `ModelRouter` consumes the
+  Phase 2 intent bucket + request size + structural-graph hints and
+  picks `cheap` / `medium` / `frontier` upstream per turn. Config:
+  `model_routes: { CodeExplain: cheap, CodeEdit: medium, ... }`. Plays
+  nicely with the Phase 1 `PromptCache` (cache key already includes
+  model id).
+- **Phase 9:** Telemetry-driven prompt evolution. Offline analyser over
+  `ProxyMetrics` + completion logs proposes per-bucket template and
+  budget tweaks. `PromptTemplates` gains versioning + an A/B harness
+  so changes can be rolled out per-request fraction.
+- **Phase 10:** Team mode. Shared `PromptCache` + `VectorStore` via a
+  new HTTP sync endpoint (`/sync/cache`, `/sync/vectors`) so a team's
+  proxies can pool warm context. Auth lands in Phase 12; until then,
+  loopback / private network only.
+- **Phase 11:** Streaming-aware compaction. Token-streaming upstream
+  proxy that compacts mid-stream for long chats by rolling completed
+  turns into a summary stored in `ChatHistoryStore`. Keeps long
+  sessions inside the model's effective context window.
+- **Phase 12:** Production hardening. HMAC / bearer auth on the proxy +
+  MCP surfaces, rate limiting, OpenTelemetry tracing, a slim Docker
+  image, Helm chart for the team-mode sync service, signed release
+  binaries, and a `--health` self-check command.
 
 # Tech Stack & Build System
 - **Language Standard:** C++17 (strictly enforced).

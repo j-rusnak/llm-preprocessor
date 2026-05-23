@@ -4,6 +4,10 @@ project(LLMPreprocessor VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# --- Phase 5 build options ---
+option(LLM_PREPROCESSOR_WITH_LLAMA_CPP
+       "Compile the optional llama.cpp-backed prompt rewriter (Phase 5)." OFF)
+
 enable_testing()
 
 # --- 1. Find the Packages (Downloaded by vcpkg) ---
@@ -83,12 +87,20 @@ add_library(preprocessor_lib
     src/structural_query_engine.cpp
     # Phase 4 modules:
     src/mcp_server.cpp
+    # Phase 5 modules:
+    src/prompt_rewriter.cpp
 )
 
 target_include_directories(preprocessor_lib PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
+
+if(LLM_PREPROCESSOR_WITH_LLAMA_CPP)
+    target_compile_definitions(preprocessor_lib PUBLIC LLM_PREPROCESSOR_WITH_LLAMA_CPP=1)
+    # llama.cpp wiring (find_package or add_subdirectory) goes here when the
+    # option is enabled. Left as a TODO so the dependency stays opt-in.
+endif()
 
 # --- Phase 0 dependencies (vcpkg manifest mode) ---
 find_package(hnswlib CONFIG REQUIRED)
@@ -151,6 +163,8 @@ add_executable(preprocessor_tests
     tests/test_structural_query_engine.cpp
     # Phase 4 tests:
     tests/test_mcp_server.cpp
+    # Phase 5 tests:
+    tests/test_prompt_rewriter.cpp
     # tests/test_embedding_engine.cpp
 )
 

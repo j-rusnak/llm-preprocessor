@@ -12,6 +12,7 @@
 #include "prompt_cache.hpp"
 #include "prompt_compiler.hpp"
 #include "prompt_optimizer.hpp"
+#include "prompt_rewriter.hpp"
 #include "prompt_templates.hpp"
 #include "proxy_metrics.hpp"
 #include "repo_index.hpp"
@@ -131,6 +132,27 @@ static int run_serve(const preprocessor::Config& config) {
             *symbol_graph, index);
         proxy.set_structural_query_engine(structural.get());
         std::cout << "[INFO] Structural query fast path enabled\n";
+    }
+
+    // Phase 5: optional prompt rewriter / context compressor.
+    std::unique_ptr<preprocessor::IPromptRewriter> rewriter;
+    if (config.prompt_rewriter_enabled) {
+        try {
+            if (config.prompt_rewriter_kind == "llama-cpp") {
+                preprocessor::LlamaCppRewriterConfig lcfg;
+                lcfg.model_path = config.llama_model_path;
+                rewriter = std::make_unique<preprocessor::LlamaCppRewriter>(lcfg);
+            } else {
+                preprocessor::HeuristicCompressionConfig hcfg;
+                hcfg.hard_truncate_chars = config.prompt_rewriter_max_chars;
+                rewriter = std::make_unique<preprocessor::HeuristicCompressionRewriter>(hcfg);
+            }
+            proxy.set_prompt_rewriter(rewriter.get());
+            std::cout << "[INFO] Prompt rewriter enabled ("
+                      << rewriter->name() << ")\n";
+        } catch (const std::exception& e) {
+            std::cerr << "[WARN] Prompt rewriter disabled: " << e.what() << "\n";
+        }
     }
 
     std::cout << "[INFO] Proxy listening on http://" << config.proxy_host << ":"

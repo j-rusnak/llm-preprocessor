@@ -34,6 +34,7 @@
 // Phase 3:
 #include "graph_aware_retriever.hpp"
 #include "mcp_server.hpp"
+#include "prompt_rewriter.hpp"
 #include "structural_query_engine.hpp"
 #include "symbol_graph.hpp"
 
@@ -633,6 +634,45 @@ void stage_mcp_server(Stats& s, bool) {
     }
 }
 
+void stage_prompt_rewriter(Stats& s, bool) {
+    std::cout << "[prompt_rewriter]\n";
+    try {
+        preprocessor::HeuristicCompressionRewriter r;
+        std::string in =
+            "// File: src/math.cpp:1-6  (chunk_id=1)\n"
+            "/* header */\n"
+            "#include <cstdint>\n\n\n\n"
+            "// returns sum\n"
+            "int add(int a, int b) {\n"
+            "    // trivial\n"
+            "    return a + b;   \n"
+            "}\n";
+        auto out = r.rewrite(in, 0);
+        report(s, "heuristic compressor reduces size", out.size() < in.size());
+        report(s, "keeps include directive", out.find("#include <cstdint>") != std::string::npos);
+        report(s, "strips inline comments", out.find("trivial") == std::string::npos);
+        report(s, "keeps code body", out.find("int add") != std::string::npos);
+
+        auto truncated = r.rewrite(std::string(400, 'x'), 64);
+        report(s, "max_chars hint truncates", truncated.size() <= 96);
+
+#ifndef LLM_PREPROCESSOR_WITH_LLAMA_CPP
+        bool threw = false;
+        try {
+            preprocessor::LlamaCppRewriterConfig cfg;
+            cfg.model_path = "none.gguf";
+            preprocessor::LlamaCppRewriter rr(cfg);
+            (void)rr;
+        } catch (const std::exception&) { threw = true; }
+        report(s, "LlamaCppRewriter throws without build flag", threw);
+#else
+        report(s, "LlamaCppRewriter compiled in", preprocessor::LlamaCppRewriter::is_available());
+#endif
+    } catch (const std::exception& e) {
+        report(s, "prompt_rewriter stage", false, e.what());
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -643,7 +683,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 + Phase 2 + Phase 3 + Phase 4 Smoke Runner ===\n\n";
+    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5 Smoke Runner ===\n\n";
 
     Stats s;
     stage_chunker(s, verbose);
@@ -663,6 +703,7 @@ int main(int argc, char** argv) {
     stage_graph_expansion(s, verbose);
     stage_structural_query(s, verbose);
     stage_mcp_server(s, verbose);
+    stage_prompt_rewriter(s, verbose);
 
     std::cout << "\nSummary: " << s.passed << " passed, " << s.failed << " failed.\n";
     return s.failed == 0 ? 0 : 1;
