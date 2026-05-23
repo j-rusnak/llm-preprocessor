@@ -189,6 +189,8 @@ add_executable(preprocessor_tests
     tests/test_streaming_compactor.cpp
     tests/test_auth_middleware.cpp
     tests/test_rate_limiter.cpp
+    # Cross-cutting effectiveness regression suite (Phases 5-12):
+    tests/test_effectiveness.cpp
     # tests/test_embedding_engine.cpp
 )
 
@@ -199,9 +201,13 @@ target_link_libraries(preprocessor_tests PRIVATE
 
 gtest_add_tests(TARGET preprocessor_tests)
 
-# --- 5. Benchmark executable ---
+# --- 5. Benchmark executables ---
 add_executable(benchmark_runner benchmarks/benchmark_runner.cpp)
 target_link_libraries(benchmark_runner PRIVATE preprocessor_lib)
+
+# Phase 5-12 effectiveness harness (no ONNX model required).
+add_executable(effectiveness_runner benchmarks/effectiveness_runner.cpp)
+target_link_libraries(effectiveness_runner PRIVATE preprocessor_lib)
 
 # --- 6. Install targets ---
 include(GNUInstallDirs)
@@ -227,7 +233,7 @@ install(EXPORT LLMPreprocessorTargets
 
 # --- 7. Copy ONNX Runtime DLL next to executables on Windows ---
 if(WIN32)
-    foreach(_tgt preprocessor_app preprocessor_tests benchmark_runner)
+    foreach(_tgt preprocessor_app preprocessor_tests benchmark_runner effectiveness_runner)
         add_custom_command(TARGET ${_tgt} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${ORT_ROOT}/lib/onnxruntime.dll"

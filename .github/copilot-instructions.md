@@ -137,6 +137,19 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   knobs (0/0 = disabled). `main.cpp` gains a `--health` flag that
   validates config + ONNX assets and exits non-zero on missing
   files. No new vcpkg deps. 227 ctest cases / 54 smoke stages pass.
+- **Effectiveness harness (DONE):**
+  `benchmarks/effectiveness_runner.cpp` standalone runner emits a
+  JSON report (stdout) + human summary table (stderr) covering every
+  Phase 5-12 module: cache hit rate / speedup, rewriter char+token
+  reduction, streaming compactor budget compliance, embedding cache
+  speedup, diff transport savings, BM25 top-1/top-3 accuracy, model
+  router accuracy, A/B sticky+balance, HMAC verifies/sec, rate-limit
+  burst+refill. `tests/test_effectiveness.cpp` adds 12
+  `Effectiveness_*` gtest cases that lock in conservative thresholds
+  (cache ≥3x, rewriter ≥15% chars, BM25 100% on hand-built queries,
+  A/B 50/50 ±5%, rate-limit burst exact). Full end-to-end testing &
+  feature-usage guide in `docs/TESTING.md`. 239 ctest cases / 54
+  smoke stages pass. No new vcpkg deps.
 
 # Tech Stack & Build System
 - **Language Standard:** C++17 (strictly enforced).
