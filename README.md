@@ -81,8 +81,23 @@ purely structural questions without forwarding to the upstream LLM:
   and "repo stats"; on a hit the proxy synthesises an OpenAI-compatible
   completion locally and never touches the upstream.
 
-Upcoming phases (symbol graph / clangd-backed retrieval, MCP server +
-VS Code extension) are tracked in
+**Phase 4 (MCP server + VS Code extension) - complete.** The same binary
+now speaks both the OpenAI HTTP protocol (`--serve`) and the Model
+Context Protocol over stdio (`--mcp`), so editors and agents can consume
+the RAG stack directly:
+
+- `McpServer` - JSON-RPC 2.0 over newline-delimited stdio. Surfaces
+  three tools (`search_repo`, `structural_query`, `get_chunk`) and two
+  resources (`repo://card`, `repo://stats`). Wires `RepoIndex`,
+  `SymbolGraph`, `StructuralQueryEngine`, and `ProjectCard` together
+  with no LLM in the loop.
+- `preprocessor_app --mcp` - single-binary distribution: pick `--serve`
+  for the HTTP proxy or `--mcp` for the stdio MCP server at startup.
+- [`vscode-extension/`](vscode-extension/) - minimal TypeScript shim
+  that registers the binary as a local MCP server with VS Code's
+  Language Model host (VS Code 1.99+).
+
+Upcoming phases (local small-LLM prompt rewriter via `llama.cpp`) are tracked in
 [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
 
 ## Architecture
@@ -139,6 +154,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **SymbolGraph** | `symbol_graph.hpp` | Defs/refs store + `ISymbolExtractor` + `RegexSymbolExtractor`; one-hop neighbour expansion. |
 | **GraphAwareRetriever** | `graph_aware_retriever.hpp` | `expand_with_graph` appends graph-reachable neighbour chunks to retrieval results. |
 | **StructuralQueryEngine** | `structural_query_engine.hpp` | Zero-LLM fast path for definition / caller / file-symbols / repo-stats queries. |
+| **McpServer** | `mcp_server.hpp` | JSON-RPC 2.0 MCP server over stdio; exposes RAG + structural surfaces as tools/resources. |
 
 ## Tech Stack
 

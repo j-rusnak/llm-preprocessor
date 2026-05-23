@@ -55,8 +55,17 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   expansion runs before cache-key computation). New config keys
   `symbol_graph_enabled`, `graph_expansion_enabled`,
   `structural_fast_path_enabled`. No new vcpkg deps.
-- **Phase 4 (next):** MCP server mode + VS Code extension; single-binary distribution.
-- **Phase 5:** Optional local small-LLM prompt rewriter via `llama.cpp`.
+- **Phase 4 (DONE):** MCP server mode + VS Code extension; single-binary
+  distribution. `McpServer` (JSON-RPC 2.0 over newline-delimited stdio)
+  exposes three tools (`search_repo`, `structural_query`, `get_chunk`)
+  and two resources (`repo://card`, `repo://stats`), wiring `RepoIndex`,
+  `SymbolGraph`, `StructuralQueryEngine`, and `ProjectCard` together
+  with no LLM in the loop. `main.cpp` gains a `--mcp` flag (mutually
+  exclusive with `--serve`) so the same binary speaks both the OpenAI
+  HTTP protocol and MCP. `vscode-extension/` is a minimal TypeScript
+  shim that registers the binary with VS Code's Language Model host
+  (1.99+). No new vcpkg deps.
+- **Phase 5 (next):** Optional local small-LLM prompt rewriter via `llama.cpp`.
 
 # Tech Stack & Build System
 - **Language Standard:** C++17 (strictly enforced).

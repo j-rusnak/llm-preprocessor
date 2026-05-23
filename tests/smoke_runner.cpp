@@ -33,6 +33,7 @@
 #include "prompt_templates.hpp"
 // Phase 3:
 #include "graph_aware_retriever.hpp"
+#include "mcp_server.hpp"
 #include "structural_query_engine.hpp"
 #include "symbol_graph.hpp"
 
@@ -577,6 +578,61 @@ void stage_structural_query(Stats& s, bool) {
     }
 }
 
+void stage_mcp_server(Stats& s, bool) {
+    std::cout << "[mcp_server]\n";
+    try {
+        auto emb = std::make_shared<p1::HashEmbedder>(16);
+        auto chunker = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+        preprocessor::RepoIndexConfig cfg;
+        cfg.embedding_dim = 16;
+        cfg.watch_for_changes = false;
+        preprocessor::RepoIndex index(emb, chunker, cfg);
+
+        auto tmp = fs::temp_directory_path() / ("mcp_smoke_" + std::to_string(
+                       std::chrono::steady_clock::now().time_since_epoch().count()));
+        fs::create_directories(tmp);
+        std::ofstream(tmp / "math.cpp")
+            << "int add(int a,int b){return a+b;}\nint caller(){return add(1,2);}\n";
+        index.index_path(tmp.string());
+
+        preprocessor::McpServer server(index);
+        nlohmann::json init = {
+            {"jsonrpc", "2.0"}, {"id", 1}, {"method", "initialize"}};
+        auto init_rep = nlohmann::json::parse(server.handle_message(init.dump()));
+        report(s, "initialize advertises serverInfo",
+               init_rep["result"]["serverInfo"]["name"] == "llm-preprocessor");
+
+        nlohmann::json tlist = {
+            {"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/list"}};
+        auto tlist_rep = nlohmann::json::parse(server.handle_message(tlist.dump()));
+        report(s, "tools/list returns 3 tools",
+               tlist_rep["result"]["tools"].size() == 3);
+
+        nlohmann::json call = {
+            {"jsonrpc", "2.0"}, {"id", 3}, {"method", "tools/call"},
+            {"params", {{"name", "search_repo"},
+                        {"arguments", {{"query", "add"}, {"k", 2}}}}}};
+        auto call_rep = nlohmann::json::parse(server.handle_message(call.dump()));
+        report(s, "search_repo returns content",
+               !call_rep["result"]["content"].empty());
+
+        nlohmann::json rlist = {
+            {"jsonrpc", "2.0"}, {"id", 4}, {"method", "resources/list"}};
+        auto rlist_rep = nlohmann::json::parse(server.handle_message(rlist.dump()));
+        report(s, "resources/list returns 2 resources",
+               rlist_rep["result"]["resources"].size() == 2);
+
+        nlohmann::json note = {
+            {"jsonrpc", "2.0"}, {"method", "notifications/initialized"}};
+        report(s, "notifications yield empty reply",
+               server.handle_message(note.dump()).empty());
+
+        std::error_code ec; fs::remove_all(tmp, ec);
+    } catch (const std::exception& e) {
+        report(s, "mcp_server stage", false, e.what());
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -587,7 +643,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 + Phase 2 + Phase 3 Smoke Runner ===\n\n";
+    std::cout << "=== LLM Preprocessor :: Phase 0 + Phase 1 + Phase 2 + Phase 3 + Phase 4 Smoke Runner ===\n\n";
 
     Stats s;
     stage_chunker(s, verbose);
@@ -606,6 +662,7 @@ int main(int argc, char** argv) {
     stage_symbol_graph(s, verbose);
     stage_graph_expansion(s, verbose);
     stage_structural_query(s, verbose);
+    stage_mcp_server(s, verbose);
 
     std::cout << "\nSummary: " << s.passed << " passed, " << s.failed << " failed.\n";
     return s.failed == 0 ? 0 : 1;

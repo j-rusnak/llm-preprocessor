@@ -81,6 +81,8 @@ add_library(preprocessor_lib
     src/symbol_graph.cpp
     src/graph_aware_retriever.cpp
     src/structural_query_engine.cpp
+    # Phase 4 modules:
+    src/mcp_server.cpp
 )
 
 target_include_directories(preprocessor_lib PUBLIC
@@ -147,6 +149,8 @@ add_executable(preprocessor_tests
     tests/test_symbol_graph.cpp
     tests/test_graph_aware_retriever.cpp
     tests/test_structural_query_engine.cpp
+    # Phase 4 tests:
+    tests/test_mcp_server.cpp
     # tests/test_embedding_engine.cpp
 )
 
