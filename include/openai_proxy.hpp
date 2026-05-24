@@ -1,5 +1,8 @@
 #pragma once
 
+#include "auth_middleware.hpp"
+#include "rate_limiter.hpp"
+
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -39,6 +42,22 @@ struct OpenAIProxyConfig {
 
     /// libcurl upstream timeout (seconds).
     long upstream_timeout_seconds = 60;
+
+    /// Local proxy authentication. Disabled when no bearer tokens or HMAC
+    /// secret are configured.
+    AuthMiddleware::Config auth;
+
+    /// Local per-caller token bucket. Disabled when both values are zero.
+    RateLimiter::Config rate_limit;
+
+    /// Maximum accepted HTTP request body size for chat completions. Set to 0
+    /// to disable the guard. The default leaves room for large coding-agent
+    /// prompts without accepting unbounded payloads.
+    std::size_t max_request_bytes = 8 * 1024 * 1024;
+
+    /// Forward the client's Authorization header to the upstream provider.
+    /// Disable this when Authorization is used as a local proxy bearer token.
+    bool forward_client_authorization = true;
 };
 
 /// OpenAI-compatible HTTP proxy.
@@ -119,6 +138,8 @@ private:
     SymbolGraph* symbol_graph_ = nullptr;
     StructuralQueryEngine* structural_engine_ = nullptr;
     IPromptRewriter* rewriter_ = nullptr;
+    AuthMiddleware auth_;
+    RateLimiter rate_limiter_;
     std::unique_ptr<httplib::Server> server_;
 };
 

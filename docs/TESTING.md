@@ -434,10 +434,25 @@ When enabled, queries like *"where is `Foo` defined"* or *"what calls
 
 ### 6.1 Auth + rate-limited proxy
 
-`AuthMiddleware` and `RateLimiter` are production primitives, but they are not
-yet wired into `ConfigLoader` / `OpenAIProxy`. Until that wiring lands, wrap the
-proxy behind a trusted local interface or an external gateway if you expose it
-beyond loopback.
+`AuthMiddleware` and `RateLimiter` are wired into `ConfigLoader` and
+`OpenAIProxy` for `/v1/chat/completions` and `/stats`. `/healthz` remains a
+public liveness check. Non-loopback serving requires proxy auth unless
+`allow_unsafe_remote_proxy` is explicitly set.
+
+```json
+{
+  "proxy_host": "0.0.0.0",
+  "proxy_auth_bearer_tokens": ["local-proxy-token"],
+  "proxy_rate_limit_tokens_per_second": 2.0,
+  "proxy_rate_limit_burst": 10.0,
+  "proxy_max_request_bytes": 8388608,
+  "proxy_forward_client_authorization": false,
+  "upstream_api_key": "provider-key"
+}
+```
+
+Use `X-Preprocessor-Authorization: Bearer <token>` for local proxy auth when a
+client also needs to send a provider key in `Authorization`.
 
 ```powershell
 .\build\preprocessor_app.exe --health config.prod.json

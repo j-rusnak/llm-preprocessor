@@ -6,6 +6,8 @@
 #include "prompt_optimizer.hpp"
 #include "prompt_rewriter.hpp"
 #include "proxy_metrics.hpp"
+#include "auth_middleware.hpp"
+#include "rate_limiter.hpp"
 #include "repo_index.hpp"
 #include "structural_query_engine.hpp"
 #include "symbol_graph.hpp"
@@ -38,6 +40,29 @@ struct UpstreamResponse {
     long status = 0;
     std::string body;
 };
+
+void set_json_error(httplib::Response& res, int status,
+                    const std::string& type,
+                    const std::string& message) {
+    res.status = status;
+    res.set_content(json{{"error", json{{"type", type}, {"message", message}}}}.dump(),
+                    "application/json");
+}
+
+std::string first_header(const httplib::Request& req,
+                         const char* primary,
+                         const char* fallback = nullptr) {
+    if (req.has_header(primary)) return req.get_header_value(primary);
+    if (fallback && req.has_header(fallback)) return req.get_header_value(fallback);
+    return {};
+}
+
+std::string rate_limit_key(const httplib::Request& req) {
+    std::string auth = first_header(req, "X-Preprocessor-Authorization", "Authorization");
+    if (!auth.empty()) return "auth:" + auth;
+    if (!req.remote_addr.empty()) return "ip:" + req.remote_addr;
+    return "anonymous";
+}
 
 /// Forward a JSON body to the upstream chat-completions endpoint via libcurl.
 /// `incoming_auth` is the Authorization header from the client request (may be
@@ -141,6 +166,8 @@ OpenAIProxy::OpenAIProxy(RepoIndex& index,
       metrics_(metrics),
       tokenizer_(tokenizer),
       config_(std::move(config)),
+      auth_(config_.auth),
+      rate_limiter_(config_.rate_limit),
       server_(std::make_unique<httplib::Server>()) {
     if (config_.upstream_url.empty()) {
         throw std::invalid_argument("OpenAIProxy: upstream_url must not be empty");
@@ -204,29 +231,72 @@ void OpenAIProxy::install_routes() {
         res.set_content("ok", "text/plain");
     });
 
-    server_->Get("/stats", [this](const httplib::Request&, httplib::Response& res) {
+    server_->Get("/stats", [this](const httplib::Request& req, httplib::Response& res) {
+        if (auth_.enabled()) {
+            const std::string auth_header =
+                first_header(req, "X-Preprocessor-Authorization", "Authorization");
+            const std::string signature =
+                first_header(req, "X-Preprocessor-Signature", "X-Signature");
+            const std::string timestamp =
+                first_header(req, "X-Preprocessor-Timestamp", "X-Timestamp");
+            if (!auth_.verify(auth_header, signature, timestamp, "")) {
+                set_json_error(res, 401, "unauthorized",
+                               "missing or invalid proxy authentication");
+                return;
+            }
+        }
+        if (rate_limiter_.enabled() && !rate_limiter_.try_acquire(rate_limit_key(req))) {
+            set_json_error(res, 429, "rate_limited",
+                           "proxy rate limit exceeded");
+            return;
+        }
         res.set_content(metrics_.snapshot().dump(2), "application/json");
     });
 
     server_->Post("/v1/chat/completions",
                   [this](const httplib::Request& req, httplib::Response& res) {
         metrics_.on_request();
+        if (config_.max_request_bytes > 0 &&
+            req.body.size() > config_.max_request_bytes) {
+            metrics_.on_error();
+            set_json_error(res, 413, "request_too_large",
+                           "request body exceeds proxy_max_request_bytes");
+            return;
+        }
+        if (auth_.enabled()) {
+            const std::string auth_header =
+                first_header(req, "X-Preprocessor-Authorization", "Authorization");
+            const std::string signature =
+                first_header(req, "X-Preprocessor-Signature", "X-Signature");
+            const std::string timestamp =
+                first_header(req, "X-Preprocessor-Timestamp", "X-Timestamp");
+            if (!auth_.verify(auth_header, signature, timestamp, req.body)) {
+                metrics_.on_error();
+                set_json_error(res, 401, "unauthorized",
+                               "missing or invalid proxy authentication");
+                return;
+            }
+        }
+        if (rate_limiter_.enabled() && !rate_limiter_.try_acquire(rate_limit_key(req))) {
+            metrics_.on_error();
+            set_json_error(res, 429, "rate_limited",
+                           "proxy rate limit exceeded");
+            return;
+        }
         json body;
         try {
             body = json::parse(req.body);
         } catch (const std::exception& e) {
             metrics_.on_error();
             res.status = 400;
-            res.set_content(json{{"error", std::string("invalid JSON: ") + e.what()}}.dump(),
-                            "application/json");
+            set_json_error(res, 400, "invalid_json",
+                           std::string("invalid JSON: ") + e.what());
             return;
         }
 
         if (!body.contains("messages") || !body["messages"].is_array()) {
             metrics_.on_error();
-            res.status = 400;
-            res.set_content(json{{"error", "missing messages[]"}}.dump(),
-                            "application/json");
+            set_json_error(res, 400, "invalid_request", "missing messages[]");
             return;
         }
 
@@ -332,7 +402,8 @@ void OpenAIProxy::install_routes() {
         try {
             metrics_.on_upstream_call();
             std::string incoming_auth;
-            if (req.has_header("Authorization")) {
+            if (config_.forward_client_authorization &&
+                req.has_header("Authorization")) {
                 incoming_auth = req.get_header_value("Authorization");
             }
             up = forward_upstream(config_.upstream_url, compiled, incoming_auth,
