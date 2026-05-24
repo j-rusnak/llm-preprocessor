@@ -1,7 +1,9 @@
 #include "openai_proxy.hpp"
 
 #include "graph_aware_retriever.hpp"
+#include "intent_classifier.hpp"
 #include "llm_tokenizer.hpp"
+#include "model_router.hpp"
 #include "prompt_cache.hpp"
 #include "prompt_optimizer.hpp"
 #include "prompt_rewriter.hpp"
@@ -363,9 +365,36 @@ void OpenAIProxy::install_routes() {
             return;
         }
 
-        const std::string model = body.value("model", std::string{"unknown"});
         const bool stream = body.value("stream", false);
         std::string user_msg = TextSanitizer::sanitize(last_user_message(body["messages"]));
+        std::string effective_model = body.value("model", std::string{"unknown"});
+        std::string upstream_url = config_.upstream_url;
+        std::string upstream_api_key = config_.upstream_api_key;
+        std::size_t max_context_chars = config_.max_context_chars;
+
+        if (config_.model_router) {
+            HeuristicIntentClassifier classifier;
+            const PromptBucket bucket = classifier.classify(user_msg);
+            if (const ModelTier* tier =
+                    config_.model_router->route(bucket, req.body.size())) {
+                if (!tier->upstream_url.empty()) {
+                    upstream_url = tier->upstream_url;
+                }
+                if (!tier->api_key.empty()) {
+                    upstream_api_key = tier->api_key;
+                }
+                if (!tier->model_name.empty()) {
+                    effective_model = tier->model_name;
+                    body["model"] = tier->model_name;
+                }
+                if (tier->max_context > 0) {
+                    max_context_chars =
+                        max_context_chars == 0
+                            ? tier->max_context
+                            : (std::min)(max_context_chars, tier->max_context);
+                }
+            }
+        }
 
         // Phase 3: zero-LLM fast path for purely structural questions.
         if (structural_engine_ && !user_msg.empty()) {
@@ -379,7 +408,7 @@ void OpenAIProxy::install_routes() {
                         {"id", std::string("local-structural-") + std::to_string(ts)},
                         {"object", "chat.completion"},
                         {"created", ts},
-                        {"model", model},
+                        {"model", effective_model},
                         {"choices", json::array({
                             json{{"index", 0},
                                  {"message", json{{"role", "assistant"},
@@ -430,11 +459,11 @@ void OpenAIProxy::install_routes() {
             auto opt = optimiser_->optimise(user_msg, retrieved);
             sys_content = std::move(opt.system_message);
         } else if (!retrieved.empty()) {
-            sys_content = build_context_block(retrieved, config_.max_context_chars);
+            sys_content = build_context_block(retrieved, max_context_chars);
         }
         if (rewriter_ && !sys_content.empty()) {
             try {
-                sys_content = rewriter_->rewrite(sys_content, config_.max_context_chars);
+                sys_content = rewriter_->rewrite(sys_content, max_context_chars);
             } catch (...) {
                 // Rewriter failures are non-fatal: keep the pre-rewrite block.
             }
@@ -451,7 +480,8 @@ void OpenAIProxy::install_routes() {
         // Request parameters such as temperature, tools, existing system
         // messages, optimiser output, and rewritten context all affect the
         // response and must participate in cache identity.
-        const std::string cache_key = PromptCache::make_key(model, compiled, chunk_ids);
+        const std::string cache_key =
+            PromptCache::make_key(effective_model, compiled, chunk_ids);
         if (!stream) {
             if (auto cached = cache_.get(cache_key)) {
                 metrics_.on_cache_hit();
@@ -471,15 +501,15 @@ void OpenAIProxy::install_routes() {
 
         if (stream) {
             metrics_.on_upstream_call();
-            const auto upstream_url = config_.upstream_url;
-            const auto fallback_key = config_.upstream_api_key;
+            const auto target_url = upstream_url;
+            const auto fallback_key = upstream_api_key;
             const auto timeout_seconds = config_.upstream_timeout_seconds;
             res.set_header("Cache-Control", "no-cache");
             res.set_chunked_content_provider(
                 "text/event-stream",
-                [upstream_url, compiled, incoming_auth, fallback_key, timeout_seconds]
+                [target_url, compiled, incoming_auth, fallback_key, timeout_seconds]
                 (std::size_t, httplib::DataSink& sink) {
-                    return stream_upstream(upstream_url, compiled, incoming_auth,
+                    return stream_upstream(target_url, compiled, incoming_auth,
                                            fallback_key, timeout_seconds, sink);
                 });
             return;
@@ -489,8 +519,8 @@ void OpenAIProxy::install_routes() {
         UpstreamResponse up;
         try {
             metrics_.on_upstream_call();
-            up = forward_upstream(config_.upstream_url, compiled, incoming_auth,
-                                  config_.upstream_api_key,
+            up = forward_upstream(upstream_url, compiled, incoming_auth,
+                                  upstream_api_key,
                                   config_.upstream_timeout_seconds);
         } catch (const std::exception& e) {
             metrics_.on_error();

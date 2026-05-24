@@ -7,6 +7,7 @@
 #include "intent_router.hpp"
 #include "llm_tokenizer.hpp"
 #include "mcp_server.hpp"
+#include "model_router.hpp"
 #include "openai_proxy.hpp"
 #include "project_card.hpp"
 #include "prompt_cache.hpp"
@@ -104,6 +105,21 @@ static int run_serve(const preprocessor::Config& config) {
     pcfg.rate_limit.burst = config.proxy_rate_limit_burst;
     pcfg.max_request_bytes = config.proxy_max_request_bytes;
     pcfg.forward_client_authorization = config.proxy_forward_client_authorization;
+
+    std::unique_ptr<preprocessor::ModelRouter> model_router;
+    if (!config.model_tiers.empty() || !config.model_routes.empty()) {
+        model_router = std::make_unique<preprocessor::ModelRouter>();
+        for (const auto& tier : config.model_tiers) {
+            model_router->add_tier(tier);
+        }
+        for (const auto& route : config.model_routes) {
+            model_router->add_route(route);
+        }
+        pcfg.model_router = model_router.get();
+        std::cout << "[INFO] Model router enabled ("
+                  << config.model_tiers.size() << " tiers / "
+                  << config.model_routes.size() << " routes)\n";
+    }
 
     preprocessor::OpenAIProxy proxy(index, cache, metrics, llm_tokenizer, pcfg);
 

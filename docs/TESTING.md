@@ -469,10 +469,12 @@ client also needs to send a provider key in `Authorization`.
 
 ### 6.2 Multi-tier routing
 
-`ModelRouter` is currently a library-level primitive. `OpenAIProxy` still uses
-the configured `upstream_url` and incoming request `model` for every request.
-Production routing needs config parsing plus proxy integration before this can
-be deployed as a user-facing setting.
+`ModelRouter` is wired into `--serve` via `model_tiers` and `model_routes`.
+The proxy classifies the latest user message, applies the first matching route,
+rewrites the outbound model, and uses tier-specific upstream URL/API-key/context
+overrides before cache lookup and forwarding. Regression coverage lives in
+`ConfigLoaderTest.LoadsModelRouterConfig` and
+`OpenAIProxy.ModelRouterSelectsTierAndRewritesForwardedRequest`.
 
 ### 6.3 Team mode (shared cache + vectors)
 

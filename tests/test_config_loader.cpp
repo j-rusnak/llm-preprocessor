@@ -228,3 +228,80 @@ TEST_F(ConfigLoaderTest, RejectsNegativeProxyMaxRequestBytes) {
     write_config(R"({"proxy_max_request_bytes": -1})");
     EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
 }
+
+TEST_F(ConfigLoaderTest, LoadsModelRouterConfig) {
+    write_config(R"({
+        "model_tiers": [
+            {
+                "name": "cheap",
+                "upstream_url": "https://cheap.example/v1/chat/completions",
+                "model_name": "gpt-cheap",
+                "api_key": "cheap-key",
+                "max_context": 4000
+            },
+            {
+                "name": "frontier",
+                "upstream_url": "https://frontier.example/v1/chat/completions",
+                "model_name": "gpt-frontier"
+            }
+        ],
+        "model_routes": [
+            {
+                "bucket": "code_edit",
+                "min_request_chars": 0,
+                "max_request_chars": 2000,
+                "tier": "cheap"
+            },
+            {
+                "bucket": "code_edit",
+                "min_request_chars": 2001,
+                "tier": "frontier"
+            }
+        ]
+    })");
+
+    auto config = preprocessor::ConfigLoader::load(temp_path_);
+
+    ASSERT_EQ(config.model_tiers.size(), 2u);
+    EXPECT_EQ(config.model_tiers[0].name, "cheap");
+    EXPECT_EQ(config.model_tiers[0].upstream_url,
+              "https://cheap.example/v1/chat/completions");
+    EXPECT_EQ(config.model_tiers[0].model_name, "gpt-cheap");
+    EXPECT_EQ(config.model_tiers[0].api_key, "cheap-key");
+    EXPECT_EQ(config.model_tiers[0].max_context, 4000u);
+    EXPECT_EQ(config.model_tiers[1].name, "frontier");
+    EXPECT_EQ(config.model_tiers[1].model_name, "gpt-frontier");
+
+    ASSERT_EQ(config.model_routes.size(), 2u);
+    EXPECT_EQ(config.model_routes[0].bucket, preprocessor::PromptBucket::CodeEdit);
+    EXPECT_EQ(config.model_routes[0].max_request_chars, 2000u);
+    EXPECT_EQ(config.model_routes[0].tier, "cheap");
+    EXPECT_EQ(config.model_routes[1].min_request_chars, 2001u);
+    EXPECT_EQ(config.model_routes[1].tier, "frontier");
+}
+
+TEST_F(ConfigLoaderTest, RejectsModelRouteWithUnknownTier) {
+    write_config(R"({
+        "model_routes": [
+            {"bucket": "code_edit", "tier": "missing"}
+        ]
+    })");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsModelRouteWithInvalidBounds) {
+    write_config(R"({
+        "model_tiers": [
+            {"name": "cheap", "model_name": "gpt-cheap"}
+        ],
+        "model_routes": [
+            {
+                "bucket": "code_edit",
+                "min_request_chars": 100,
+                "max_request_chars": 10,
+                "tier": "cheap"
+            }
+        ]
+    })");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
