@@ -32,13 +32,11 @@ struct SyncBundle {
 
 /// Phase 10 team-mode shim. Provides JSON serialization helpers + counters
 /// for sharing `PromptCache` + `VectorStore` snapshots across a small team's
-/// proxies. The HTTP routes (`/sync/cache`, `/sync/vectors`) are wired
-/// separately in `OpenAIProxy` so this class stays transport-agnostic and
-/// easy to test.
+/// proxies. Cache HTTP routes are wired separately in `OpenAIProxy` so this
+/// class stays transport-agnostic and easy to test.
 ///
-/// Auth is intentionally out of scope here: Phase 12 lands HMAC / bearer
-/// middleware around the same routes. Until then, deployments must keep
-/// the sync endpoint on a loopback or private interface.
+/// Auth is intentionally out of scope here; `OpenAIProxy` applies the same
+/// bearer/HMAC middleware used for the chat and stats routes.
 class SyncEndpoint {
 public:
     /// Merge a peer's bundle into the local `PromptCache`. Returns the

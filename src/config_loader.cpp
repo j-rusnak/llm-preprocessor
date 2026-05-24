@@ -229,6 +229,8 @@ Config ConfigLoader::load(const std::string& filepath) {
         j.value("proxy_rate_limit_burst", config.proxy_rate_limit_burst);
     config.proxy_max_request_bytes =
         read_size_t_field(j, "proxy_max_request_bytes", config.proxy_max_request_bytes);
+    config.sync_cache_export_limit =
+        read_size_t_field(j, "sync_cache_export_limit", config.sync_cache_export_limit);
     config.allow_unsafe_remote_proxy =
         j.value("allow_unsafe_remote_proxy", config.allow_unsafe_remote_proxy);
     if (j.contains("proxy_forward_client_authorization")) {

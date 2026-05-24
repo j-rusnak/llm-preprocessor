@@ -116,9 +116,9 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   vectors}` with `SyncCacheEntry{key, body}` and `SyncVectorEntry{
   chunk_id, vec, source_path}`. `to_json` / `from_json` over
   `nlohmann::json`; `apply_to_cache(bundle, PromptCache*)` returns
-  applied count and bumps `bundles_imported()`. HTTP wiring is a
-  thin caller-side wrapper; auth lands in Phase 12. No new vcpkg
-  deps.
+  applied count and bumps `bundles_imported()`. `OpenAIProxy` has
+  authenticated `GET/POST /sync/cache`; vector HTTP sync still needs
+  an enumerable vector snapshot before wiring. No new vcpkg deps.
 - **Phase 11 (DONE):** Streaming-aware compaction -
   `StreamingCompactor` folds older `ChatTurn{role, content}` entries
   into a rolling summary string suitable for re-injection as a

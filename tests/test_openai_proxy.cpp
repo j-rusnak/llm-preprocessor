@@ -6,6 +6,7 @@
 #include "prompt_cache.hpp"
 #include "proxy_metrics.hpp"
 #include "repo_index.hpp"
+#include "sync_endpoint.hpp"
 
 #include <gtest/gtest.h>
 
@@ -392,4 +393,49 @@ TEST(OpenAIProxy, ModelRouterSelectsTierAndRewritesForwardedRequest) {
 
     auto forwarded = json::parse(routed_upstream.last_body);
     EXPECT_EQ(forwarded["model"], "gpt-frontier");
+}
+
+TEST(OpenAIProxy, SyncCacheExportRequiresConfiguredAuth) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"sync-token"};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Get("/sync/cache");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 401);
+}
+
+TEST(OpenAIProxy, SyncCacheImportAndExportWithAuth) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"sync-token"};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    preprocessor::SyncEndpoint sync;
+    preprocessor::SyncBundle bundle;
+    bundle.cache.push_back({"team-key", "team-payload"});
+
+    httplib::Client cli("127.0.0.1", h.port);
+    httplib::Headers headers{{"X-Preprocessor-Authorization", "Bearer sync-token"}};
+    auto imported = cli.Post("/sync/cache", headers, sync.to_json(bundle),
+                             "application/json");
+
+    ASSERT_TRUE(imported);
+    EXPECT_EQ(imported->status, 200);
+    EXPECT_EQ(h.cache.get("team-key").value_or(""), "team-payload");
+
+    auto exported = cli.Get("/sync/cache", headers);
+    ASSERT_TRUE(exported);
+    EXPECT_EQ(exported->status, 200);
+    auto roundtrip = sync.from_json(exported->body);
+    ASSERT_EQ(roundtrip.cache.size(), 1u);
+    EXPECT_EQ(roundtrip.cache[0].key, "team-key");
+    EXPECT_EQ(roundtrip.cache[0].body, "team-payload");
 }
