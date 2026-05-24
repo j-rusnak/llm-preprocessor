@@ -289,15 +289,6 @@ void OpenAIProxy::install_routes() {
         chunk_ids.reserve(retrieved.size());
         for (const auto& r : retrieved) chunk_ids.push_back(r.chunk.id);
 
-        // Cache lookup BEFORE mutating the body so the key is deterministic
-        // across identical requests.
-        const std::string cache_key = PromptCache::make_key(model, user_msg, chunk_ids);
-        if (auto cached = cache_.get(cache_key)) {
-            metrics_.on_cache_hit();
-            res.set_content(*cached, "application/json");
-            return;
-        }
-
         // Inject retrieved context as a system message.
         const std::size_t original_tokens = tokenizer_.count_tokens(req.body);
         std::string sys_content;
@@ -322,6 +313,17 @@ void OpenAIProxy::install_routes() {
             msgs.insert(msgs.end() - 1, sys_msg);
         }
         const std::string compiled = body.dump();
+        // Cache the fully compiled upstream request, not just the user text.
+        // Request parameters such as temperature, tools, existing system
+        // messages, optimiser output, and rewritten context all affect the
+        // response and must participate in cache identity.
+        const std::string cache_key = PromptCache::make_key(model, compiled, chunk_ids);
+        if (auto cached = cache_.get(cache_key)) {
+            metrics_.on_cache_hit();
+            res.set_content(*cached, "application/json");
+            return;
+        }
+
         const std::size_t compiled_tokens = tokenizer_.count_tokens(compiled);
         metrics_.observe_tokens(original_tokens, compiled_tokens);
 

@@ -126,6 +126,8 @@ private:
     mutable std::mutex mu_;
     // id -> chunk metadata (text, file_path, lines, symbol).
     std::unordered_map<std::uint64_t, CodeChunk> chunks_by_id_;
+    // id -> per-file chunk metadata for duplicate content-addressed chunks.
+    std::unordered_map<std::uint64_t, std::unordered_map<std::string, CodeChunk>> chunk_refs_by_id_;
     // file_path -> ids contributed by that file.
     std::unordered_map<std::string, std::unordered_set<std::uint64_t>> ids_by_file_;
     // file_path -> watcher id of the directory we're watching for it.

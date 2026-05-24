@@ -54,3 +54,25 @@ TEST(StreamingCompactor, KeepRecentRespected) {
     auto r = c.compact(h);
     EXPECT_GE(r.kept.size(), 3u);
 }
+
+TEST(StreamingCompactor, SummaryAndKeptTurnsStayUnderBudgetWhenPossible) {
+    StreamingCompactor::Config cfg;
+    cfg.max_total_chars = 180;
+    cfg.keep_recent = 1;
+    cfg.summary_chars_per_turn = 30;
+    StreamingCompactor c(cfg);
+
+    std::vector<ChatTurn> h;
+    for (int i = 0; i < 10; ++i) {
+        h.push_back({"user", "message number " + std::to_string(i) + " with enough detail"});
+    }
+
+    auto r = c.compact(h);
+    ASSERT_GT(r.rolled, 0u);
+
+    std::size_t total = r.rolled_summary.size();
+    for (const auto& t : r.kept) {
+        total += t.role.size() + t.content.size() + 4;
+    }
+    EXPECT_LE(total, cfg.max_total_chars);
+}

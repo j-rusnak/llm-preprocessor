@@ -28,8 +28,8 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   tree-sitter slots in behind the same `IChunker` later), `OpenAIProxy`
   (cpp-httplib server with `POST /v1/chat/completions`, `GET /healthz`,
   `GET /stats`), `BM25Index` + `HybridRetriever` (RRF fusion, `k=60`),
-  `PromptCache` (SQLite, xxhash64 of `(model, prompt, sorted(chunk_ids))`,
-  optional TTL), `RepoIndex` wiring `FileWatcher` to incremental
+  `PromptCache` (SQLite, xxhash64 of `(model, compiled upstream request,
+  sorted_chunk_ids)`, optional TTL), `RepoIndex` wiring `FileWatcher` to incremental
   re-indexing, `ProxyMetrics` for telemetry on tokens saved, `--serve`
   mode in `main`. Dependency added: `cpp-httplib`.
 - **Phase 2 (DONE):** Project card + per-bucket prompt templates -
@@ -79,7 +79,7 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   New config keys: `prompt_rewriter_enabled`, `prompt_rewriter_kind`,
   `prompt_rewriter_max_chars`, `llama_model_path`. No new vcpkg deps;
   `llama.cpp` linkage is deferred to Phase 6 once the model story is
-  finalised. 188 ctest cases / 45 smoke stages pass.
+  finalised. Full ctest and smoke suites pass.
 - **Phase 6 (DONE):** Diff-aware response patching - `DiffPatcher`
   permissive unified-diff parser + applier. Parses `diff --git` /
   `--- ` / `+++ ` headers and `@@` hunks, validates context against
@@ -100,8 +100,8 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   upstream_url, model_name, api_key, max_context}` + `ModelRoute{
   PromptBucket bucket, min/max_request_chars, tier}`. `ModelRouter`
   with `add_tier` / `add_route` / `route(bucket, chars)` /
-  `tier(name)`. Plays nicely with `PromptCache` (cache key already
-  includes model id). Thread-safe via `std::mutex`. No new vcpkg
+  `tier(name)`. Plays nicely with `PromptCache` because the cache key includes
+  model id and the full compiled upstream request. Thread-safe via `std::mutex`. No new vcpkg
   deps.
 - **Phase 9 (DONE):** Telemetry-driven prompt evolution - `AbHarness`
   with `AbVariant{name, weight}` + `AbExperiment{id, variants}`.
@@ -124,9 +124,9 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   into a rolling summary string suitable for re-injection as a
   system message. `Config{max_total_chars=6000,
   summary_chars_per_turn=160, keep_recent=4}` keeps the most recent
-  N turns verbatim, grows the kept window until budget, and writes
-  `"Summary of earlier turns:\n- role: excerpt..."` for the rolled
-  tail. Dependency-free; pluggable behind the same surface as the
+  N turns verbatim, grows the kept window until budget, and caps the
+  rolled summary plus kept turns to `max_total_chars` when possible.
+  Dependency-free; pluggable behind the same surface as the
   Phase 5 rewriter. No new vcpkg deps.
 - **Phase 12 (DONE):** Production hardening - `AuthMiddleware` with
   bearer-token allow-list + HMAC-SHA256 (inline RFC-6234
@@ -136,7 +136,7 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   token-bucket per caller key with `tokens_per_second` / `burst`
   knobs (0/0 = disabled). `main.cpp` gains a `--health` flag that
   validates config + ONNX assets and exits non-zero on missing
-  files. No new vcpkg deps. 227 ctest cases / 54 smoke stages pass.
+  files. No new vcpkg deps. Full ctest and smoke suites pass.
 - **Effectiveness harness (DONE):**
   `benchmarks/effectiveness_runner.cpp` standalone runner emits a
   JSON report (stdout) + human summary table (stderr) covering every
@@ -148,8 +148,8 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   `Effectiveness_*` gtest cases that lock in conservative thresholds
   (cache ≥3x, rewriter ≥15% chars, BM25 100% on hand-built queries,
   A/B 50/50 ±5%, rate-limit burst exact). Full end-to-end testing &
-  feature-usage guide in `docs/TESTING.md`. 239 ctest cases / 54
-  smoke stages pass. No new vcpkg deps.
+  feature-usage guide in `docs/TESTING.md`. Full ctest and smoke suites pass.
+  No new vcpkg deps.
 
 # Tech Stack & Build System
 - **Language Standard:** C++17 (strictly enforced).

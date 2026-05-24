@@ -35,7 +35,7 @@ proxy now sits between your IDE/agent and the upstream LLM:
 - `HybridRetriever` - fuses `VectorStore` ANN hits with BM25 hits via
   Reciprocal Rank Fusion (RRF, `k=60`).
 - `PromptCache` - SQLite-backed cache keyed by
-  `xxhash64(model || prompt || sorted(chunk_ids))` with optional TTL.
+  `xxhash64(model || compiled_upstream_request || sorted(chunk_ids))` with optional TTL.
 - `ProxyMetrics` - lock-free atomic counters for requests, cache hits,
   upstream calls, errors, and **tokens saved** (compiled vs original).
 - `RepoIndex` - wires `BraceAwareChunker` + embedder + `VectorStore` +
@@ -202,7 +202,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final OpenAI-style JSON payload. |
 | **BM25Index** | `bm25_index.hpp` | Okapi BM25 ranker with identifier-aware tokenisation. |
 | **HybridRetriever** | `hybrid_retriever.hpp` | RRF fusion of `VectorStore` + `BM25Index` hits. |
-| **PromptCache** | `prompt_cache.hpp` | SQLite-backed cache of upstream responses, keyed by `(model, prompt, chunk_ids)`. |
+| **PromptCache** | `prompt_cache.hpp` | SQLite-backed cache of upstream responses, keyed by `(model, compiled request, chunk_ids)`. |
 | **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, tokens saved. |
 | **RepoIndex** | `repo_index.hpp` | End-to-end chunk + embed + index over a repo, kept fresh by `FileWatcher`. |
 | **OpenAIProxy** | `openai_proxy.hpp` | cpp-httplib server, OpenAI-compatible chat completions with RAG context injection. |
@@ -512,7 +512,7 @@ LLM Preprocessor ready. Type your input (or 'quit' to exit).
 #include "embedding_engine.hpp"
 #include "tokenizer.hpp"
 #include "prompt_compiler.hpp"
-#include "memory_engine.hpp"
+#include "chat_history_store.hpp"
 #include "context_gatherer.hpp"
 #include "text_sanitizer.hpp"
 
@@ -523,7 +523,7 @@ auto config = preprocessor::ConfigLoader::load("config.json");
 auto tokenizer = std::make_shared<preprocessor::Tokenizer>(config.vocab_path);
 auto engine = std::make_shared<preprocessor::EmbeddingEngine>(config.model_path, tokenizer);
 preprocessor::IntentRouter router(config.similarity_threshold, engine);
-preprocessor::MemoryEngine memory(config.db_path);
+preprocessor::ChatHistoryStore history_store(config.db_path);
 preprocessor::PromptCompiler compiler(config.system_prompt);
 
 // Register intents (multiple synonym examples per intent)
@@ -544,7 +544,7 @@ if (matched) {
     for (const auto& url : urls) {
         context += preprocessor::ContextGatherer::fetch_url(url);
     }
-    auto history = memory.get_recent_history(config.history_limit);
+    auto history = history_store.get_recent_history(config.history_limit);
     std::string payload = compiler.build_payload(input, context, history);
     // Send payload to your LLM...
 }
@@ -702,7 +702,7 @@ ctest --output-on-failure -V
 cd build
 .\preprocessor_tests.exe --gtest_filter="TextSanitizerTest.*"
 .\preprocessor_tests.exe --gtest_filter="IntentRouterTest.*"
-.\preprocessor_tests.exe --gtest_filter="MemoryEngineTest.*"
+.\preprocessor_tests.exe --gtest_filter="ChatHistoryStoreTest.*"
 .\preprocessor_tests.exe --gtest_filter="PromptCompilerTest.*"
 .\preprocessor_tests.exe --gtest_filter="UrlExtractionTest.*"
 .\preprocessor_tests.exe --gtest_filter="ConfigLoaderTest.*"
@@ -728,14 +728,16 @@ cd build
 |---|---|---|
 | **TextSanitizerTest** | 5 | Whitespace collapsing, case normalization, trimming |
 | **IntentRouterTest** | 5 | Cosine similarity routing, edge cases, empty/identical embeddings |
-| **MemoryEngineTest** | 10 | SQLite CRUD, ordering, history limits, move semantics, update, clear, prune |
+| **ChatHistoryStoreTest** | 10 | SQLite CRUD, ordering, history limits, move semantics, update, clear, prune |
 | **PromptCompilerTest** | 7 | JSON payload construction, `build_payload_json`, API params |
 | **UrlExtractionTest** | 6 | URL detection in text (http/https, mixed content) |
 | **ConfigLoaderTest** | 18 | Config validation, defaults, multi-example parsing, backward compat, bounds checking |
 | **TokenizerTest** | 12 | WordPiece encoding, special tokens, truncation, subwords |
 | **EmbeddingEngineTest** | 13 | Shape, normalization, similarity, multi-example routing, sliding-window, stop-words |
 
-**Total: 76 unit tests + 11 integration tests (EmbeddingEngine) = 87 tests**
+Use `ctest --test-dir build --output-on-failure` or
+`.\build\preprocessor_tests.exe --gtest_list_tests` for the authoritative
+current test list.
 
 ## Complete Workflow Reference
 

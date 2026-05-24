@@ -159,6 +159,34 @@ TEST(OpenAIProxy, ForwardsAndCachesAndMeasures) {
     EXPECT_EQ(j["upstream_calls"], 1u);
 }
 
+TEST(OpenAIProxy, CacheKeyIncludesFullCompiledRequest) {
+    ProxyHarness h;
+    FakeUpstream up;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions");
+
+    json first = {
+        {"model", "gpt-test"},
+        {"temperature", 0.1},
+        {"messages", json::array({
+            {{"role", "user"}, {"content", "explain the project"}}
+        })}
+    };
+    json second = first;
+    second["temperature"] = 0.9;
+
+    httplib::Client cli("127.0.0.1", h.port);
+    cli.set_read_timeout(5, 0);
+    auto r1 = cli.Post("/v1/chat/completions", first.dump(), "application/json");
+    ASSERT_TRUE(r1);
+    EXPECT_EQ(r1->status, 200);
+
+    auto r2 = cli.Post("/v1/chat/completions", second.dump(), "application/json");
+    ASSERT_TRUE(r2);
+    EXPECT_EQ(r2->status, 200);
+
+    EXPECT_EQ(up.calls.load(), 2);
+}
+
 TEST(OpenAIProxy, BadJsonReturns400) {
     ProxyHarness h;
     FakeUpstream up;

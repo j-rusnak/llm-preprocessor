@@ -139,3 +139,33 @@ TEST(RepoIndex, ForgetFileRemoves) {
     EXPECT_EQ(idx.file_count(), 0u);
     EXPECT_EQ(idx.chunk_count(), 0u);
 }
+
+TEST(RepoIndex, ForgetFileKeepsDuplicateContentFromOtherFiles) {
+    TempDir d;
+    const std::string same = R"(void shared_symbol() {
+    return;
+}
+)";
+    d.write("a.cpp", same);
+    d.write("b.cpp", same);
+
+    auto embedder = std::make_shared<MockEmbedder>(16);
+    auto chunker  = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+    preprocessor::RepoIndexConfig cfg;
+    cfg.embedding_dim = 16;
+    cfg.watch_for_changes = false;
+    preprocessor::RepoIndex idx(embedder, chunker, cfg);
+    idx.index_path(d.path().string());
+
+    EXPECT_EQ(idx.file_count(), 2u);
+    ASSERT_EQ(idx.chunk_count(), 1u);
+
+    idx.forget_file((d.path() / "a.cpp").string());
+
+    EXPECT_EQ(idx.file_count(), 1u);
+    EXPECT_EQ(idx.chunk_count(), 1u);
+
+    auto hits = idx.search("shared_symbol", 3);
+    ASSERT_FALSE(hits.empty());
+    EXPECT_NE(hits[0].chunk.file_path.find("b.cpp"), std::string::npos);
+}

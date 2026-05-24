@@ -154,19 +154,22 @@ void RepoIndex::index_file_locked(const std::string& file_path) {
 
     auto& bucket = ids_by_file_[file_path];
     for (std::size_t i = 0; i < chunks.size(); ++i) {
-        // Skip duplicate ids (e.g. identical chunks across files).
-        if (chunks_by_id_.count(chunks[i].id)) {
-            bucket.insert(chunks[i].id);
+        const std::uint64_t id = chunks[i].id;
+        auto& refs = chunk_refs_by_id_[id];
+        refs[file_path] = chunks[i];
+        bucket.insert(id);
+
+        // Keep one indexed representative per content-addressed chunk id.
+        if (chunks_by_id_.count(id)) {
             continue;
         }
-        vectors_->add(chunks[i].id, embeds[i]);
-        keywords_->add(chunks[i].id, chunks[i].text);
-        bucket.insert(chunks[i].id);
+        vectors_->add(id, embeds[i]);
+        keywords_->add(id, chunks[i].text);
         if (symbol_graph_ && symbol_extractor_) {
             symbol_graph_->update_chunk(chunks[i],
                                         symbol_extractor_->extract(chunks[i]));
         }
-        chunks_by_id_.emplace(chunks[i].id, std::move(chunks[i]));
+        chunks_by_id_.emplace(id, std::move(chunks[i]));
     }
 }
 
@@ -183,13 +186,35 @@ void RepoIndex::forget_file(const std::string& file_path) {
 void RepoIndex::forget_file_locked(const std::string& file_path) {
     auto it = ids_by_file_.find(file_path);
     if (it == ids_by_file_.end()) return;
+    if (symbol_graph_) symbol_graph_->remove_file(file_path);
     for (auto id : it->second) {
+        bool erased_representative = false;
+        auto chunk_it = chunks_by_id_.find(id);
+        if (chunk_it != chunks_by_id_.end() && chunk_it->second.file_path == file_path) {
+            erased_representative = true;
+        }
+
+        auto refs_it = chunk_refs_by_id_.find(id);
+        if (refs_it != chunk_refs_by_id_.end()) {
+            refs_it->second.erase(file_path);
+            if (!refs_it->second.empty()) {
+                if (erased_representative) {
+                    chunks_by_id_[id] = refs_it->second.begin()->second;
+                    if (symbol_graph_ && symbol_extractor_) {
+                        symbol_graph_->update_chunk(chunks_by_id_[id],
+                                                    symbol_extractor_->extract(chunks_by_id_[id]));
+                    }
+                }
+                continue;
+            }
+            chunk_refs_by_id_.erase(refs_it);
+        }
+
         vectors_->remove(id);
         keywords_->remove(id);
         chunks_by_id_.erase(id);
     }
     ids_by_file_.erase(it);
-    if (symbol_graph_) symbol_graph_->remove_file(file_path);
 }
 
 std::vector<RetrievedChunk> RepoIndex::search(const std::string& query, std::size_t k) const {
