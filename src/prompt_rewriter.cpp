@@ -178,8 +178,12 @@ std::string dedupe_adjacent(const std::string& in) {
 
 std::string clip(const std::string& s, std::size_t max_chars) {
     if (max_chars == 0 || s.size() <= max_chars) return s;
-    std::string out = s.substr(0, max_chars);
-    out += "\n... [truncated]";
+    static const std::string marker = "\n... [truncated]";
+    if (max_chars <= marker.size()) {
+        return marker.substr(0, max_chars);
+    }
+    std::string out = s.substr(0, max_chars - marker.size());
+    out += marker;
     return out;
 }
 

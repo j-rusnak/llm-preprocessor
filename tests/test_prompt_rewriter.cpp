@@ -102,7 +102,7 @@ TEST(HeuristicCompressionRewriter, HardTruncateAppliesMaxCharsHint) {
     HeuristicCompressionRewriter r;
     std::string in(500, 'x');
     auto out = r.rewrite(in, 50);
-    EXPECT_LE(out.size(), 50 + 30u);  // allow room for "[truncated]" marker
+    EXPECT_LE(out.size(), 50u);
     EXPECT_NE(out.find("truncated"), std::string::npos);
 }
 

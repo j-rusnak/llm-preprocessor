@@ -29,7 +29,7 @@ Expected:
 
 | Surface | Pass criterion |
 |---|---|
-| `ctest` | `100% tests passed, 0 tests failed out of 239` |
+| `ctest` | `100% tests passed, 0 tests failed` |
 | `smoke_runner.exe` | `Summary: 54 passed, 0 failed.` |
 | `effectiveness_runner.exe` | Exit 0, summary table on stderr, JSON on stdout |
 
@@ -75,7 +75,7 @@ Option C there.
 
 ## 3. The four test surfaces
 
-### 3.1 Unit tests (Google Test, 239 cases)
+### 3.1 Unit tests (Google Test)
 
 ```powershell
 ctest --test-dir build --output-on-failure
@@ -188,7 +188,7 @@ Stderr prints a human-readable summary table:
 
 ### 4.4 Regression thresholds
 
-The `Effectiveness_*` gtest cases (12 of the 239) lock in conservative floors:
+The `Effectiveness_*` gtest cases lock in conservative floors:
 
 | Test | Floor |
 |---|---|
@@ -251,15 +251,15 @@ overrides. Non-zero exit means *do not start the server*.
 
 ```cpp
 preprocessor::PromptCache cache("cache.sqlite", /*ttl_seconds=*/86400);
-auto key = preprocessor::PromptCache::make_key(model, prompt, chunk_ids);
+auto key = preprocessor::PromptCache::make_key(model, compiled_upstream_request, chunk_ids);
 if (auto hit = cache.get(key)) {
     return *hit;            // skip upstream
 }
 cache.put(key, upstream_response);
 ```
 
-The key already includes the model id, so multi-tier routing (5.10) shares
-one DB safely.
+The key includes the model id and the full compiled upstream request, so changes
+to parameters such as `temperature`, tools, or injected context do not collide.
 
 ### 5.5 `HeuristicCompressionRewriter` (Phase 5)
 
@@ -434,19 +434,10 @@ When enabled, queries like *"where is `Foo` defined"* or *"what calls
 
 ### 6.1 Auth + rate-limited proxy
 
-```json
-{
-  "serve_port": 8080,
-  "upstream_url": "https://api.openai.com/v1/chat/completions",
-  "upstream_api_key": "sk-...",
-  "auth": {
-    "allowed_bearer_tokens": ["team-prod"],
-    "hmac_secret": "rotate-me",
-    "max_clock_skew": 300
-  },
-  "rate_limit": { "tokens_per_second": 5.0, "burst": 20.0 }
-}
-```
+`AuthMiddleware` and `RateLimiter` are production primitives, but they are not
+yet wired into `ConfigLoader` / `OpenAIProxy`. Until that wiring lands, wrap the
+proxy behind a trusted local interface or an external gateway if you expose it
+beyond loopback.
 
 ```powershell
 .\build\preprocessor_app.exe --health config.prod.json
@@ -455,27 +446,16 @@ When enabled, queries like *"where is `Foo` defined"* or *"what calls
 
 ### 6.2 Multi-tier routing
 
-```json
-{
-  "model_router": {
-    "tiers": [
-      {"name":"cheap","upstream_url":"...","model_name":"gpt-4o-mini","api_key":"$K1","max_context":16000},
-      {"name":"frontier","upstream_url":"...","model_name":"gpt-4o","api_key":"$K2","max_context":128000}
-    ],
-    "routes": [
-      {"bucket":"CodeEdit","min_chars":0,"max_chars":1000,"tier":"cheap"},
-      {"bucket":"CodeGenerate","min_chars":4000,"max_chars":0,"tier":"frontier"}
-    ]
-  }
-}
-```
+`ModelRouter` is currently a library-level primitive. `OpenAIProxy` still uses
+the configured `upstream_url` and incoming request `model` for every request.
+Production routing needs config parsing plus proxy integration before this can
+be deployed as a user-facing setting.
 
 ### 6.3 Team mode (shared cache + vectors)
 
-Stand the proxy up with a writable `prompt_cache_path` and a writable
-`embedding_cache_path` on a shared volume, then have each teammate POST their
-local `SyncBundle` JSON to a coordinator that calls
-`SyncEndpoint::apply_to_cache`. Auth (6.1) protects the endpoint.
+`SyncEndpoint` serializes cache and vector bundles, but the HTTP routes are not
+yet wired into `OpenAIProxy`. Keep team-mode sync behind a private coordinator
+until authenticated import/export routes exist.
 
 ### 6.4 MCP for VS Code
 
