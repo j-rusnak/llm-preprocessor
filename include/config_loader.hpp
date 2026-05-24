@@ -4,6 +4,7 @@
 #include <vector>
 #include <utility>
 #include <optional>
+#include <cstddef>
 
 namespace preprocessor {
 
@@ -32,6 +33,16 @@ struct Config {
     std::size_t max_context_chars = 8000;
     std::string upstream_url = "https://api.openai.com/v1/chat/completions";
     std::string upstream_api_key;
+
+    // --- Phase 12: secure proxy runtime settings (all optional) ---
+    std::vector<std::string> proxy_auth_bearer_tokens;
+    std::string proxy_auth_hmac_secret;
+    int proxy_auth_max_clock_skew_seconds = 300;
+    double proxy_rate_limit_tokens_per_second = 0.0;
+    double proxy_rate_limit_burst = 0.0;
+    std::size_t proxy_max_request_bytes = 8 * 1024 * 1024;
+    bool proxy_forward_client_authorization = true;
+    bool allow_unsafe_remote_proxy = false;
 
     // --- Phase 2: prompt optimiser settings (all optional) ---
     bool prompt_optimizer_enabled = false;

@@ -44,12 +44,16 @@ struct FakeUpstream {
     std::thread thr;
     std::atomic<int> calls{0};
     std::string last_body;
+    std::string last_authorization;
 
     FakeUpstream() : server(std::make_shared<httplib::Server>()) {
         server->Post("/v1/chat/completions",
                      [this](const httplib::Request& req, httplib::Response& res) {
             calls.fetch_add(1);
             last_body = req.body;
+            last_authorization = req.has_header("Authorization")
+                ? req.get_header_value("Authorization")
+                : std::string{};
             json out = {
                 {"id", "fake-1"},
                 {"object", "chat.completion"},
@@ -93,8 +97,8 @@ struct ProxyHarness {
     int port = 0;
     std::thread thr;
 
-    void start(const std::string& upstream_url) {
-        preprocessor::OpenAIProxyConfig pcfg;
+    void start(const std::string& upstream_url,
+               preprocessor::OpenAIProxyConfig pcfg = {}) {
         pcfg.upstream_url = upstream_url;
         pcfg.retrieval_k = 4;
         proxy = std::make_unique<preprocessor::OpenAIProxy>(
@@ -195,4 +199,87 @@ TEST(OpenAIProxy, BadJsonReturns400) {
     auto r = cli.Post("/v1/chat/completions", "{ not json", "application/json");
     ASSERT_TRUE(r);
     EXPECT_EQ(r->status, 400);
+}
+
+TEST(OpenAIProxy, AuthRejectsMissingBearerBeforeUpstream) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"local-token"};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"messages", json::array({{{"role", "user"}, {"content", "hello"}}})}
+    };
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 401);
+    EXPECT_EQ(up.calls.load(), 0);
+}
+
+TEST(OpenAIProxy, AuthAllowsBearerAndDoesNotLeakLocalTokenWhenDisabledForwarding) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"local-token"};
+    cfg.upstream_api_key = "upstream-token";
+    cfg.forward_client_authorization = false;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"messages", json::array({{{"role", "user"}, {"content", "hello"}}})}
+    };
+    httplib::Client cli("127.0.0.1", h.port);
+    httplib::Headers headers{{"Authorization", "Bearer local-token"}};
+    auto r = cli.Post("/v1/chat/completions", headers, body.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+    EXPECT_EQ(up.calls.load(), 1);
+    EXPECT_EQ(up.last_authorization, "Bearer upstream-token");
+}
+
+TEST(OpenAIProxy, RateLimitRejectsBeforeCacheOrUpstream) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.rate_limit.tokens_per_second = 0.01;
+    cfg.rate_limit.burst = 1.0;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"messages", json::array({{{"role", "user"}, {"content", "hello"}}})}
+    };
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r1 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    ASSERT_TRUE(r1);
+    EXPECT_EQ(r1->status, 200);
+
+    auto r2 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    ASSERT_TRUE(r2);
+    EXPECT_EQ(r2->status, 429);
+    EXPECT_EQ(up.calls.load(), 1);
+}
+
+TEST(OpenAIProxy, RequestBodyTooLargeReturns413BeforeUpstream) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.max_request_bytes = 24;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/v1/chat/completions",
+                      R"({"model":"gpt-test","messages":[{"role":"user","content":"too large"}]})",
+                      "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 413);
+    EXPECT_EQ(up.calls.load(), 0);
 }

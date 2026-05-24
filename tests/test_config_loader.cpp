@@ -168,3 +168,63 @@ TEST_F(ConfigLoaderTest, RejectsInvalidMaxTokens) {
     write_config(R"({"max_tokens": 0})");
     EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
 }
+
+TEST_F(ConfigLoaderTest, LoadsProxySecuritySettings) {
+    write_config(R"({
+        "proxy_auth_bearer_tokens": ["local-a", "local-b"],
+        "proxy_auth_hmac_secret": "shared-secret",
+        "proxy_auth_max_clock_skew_seconds": 90,
+        "proxy_rate_limit_tokens_per_second": 12.5,
+        "proxy_rate_limit_burst": 30,
+        "proxy_max_request_bytes": 1048576,
+        "proxy_forward_client_authorization": false,
+        "allow_unsafe_remote_proxy": false
+    })");
+    auto config = preprocessor::ConfigLoader::load(temp_path_);
+
+    ASSERT_EQ(config.proxy_auth_bearer_tokens.size(), 2u);
+    EXPECT_EQ(config.proxy_auth_bearer_tokens[0], "local-a");
+    EXPECT_EQ(config.proxy_auth_bearer_tokens[1], "local-b");
+    EXPECT_EQ(config.proxy_auth_hmac_secret, "shared-secret");
+    EXPECT_EQ(config.proxy_auth_max_clock_skew_seconds, 90);
+    EXPECT_DOUBLE_EQ(config.proxy_rate_limit_tokens_per_second, 12.5);
+    EXPECT_DOUBLE_EQ(config.proxy_rate_limit_burst, 30.0);
+    EXPECT_EQ(config.proxy_max_request_bytes, 1048576u);
+    EXPECT_FALSE(config.proxy_forward_client_authorization);
+    EXPECT_FALSE(config.allow_unsafe_remote_proxy);
+}
+
+TEST_F(ConfigLoaderTest, RejectsNonLoopbackProxyWithoutAuthByDefault) {
+    write_config(R"({"proxy_host": "0.0.0.0"})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, AllowsNonLoopbackProxyWithBearerAuth) {
+    write_config(R"({
+        "proxy_host": "0.0.0.0",
+        "proxy_auth_bearer_tokens": ["local-token"]
+    })");
+    auto config = preprocessor::ConfigLoader::load(temp_path_);
+    EXPECT_EQ(config.proxy_host, "0.0.0.0");
+    ASSERT_EQ(config.proxy_auth_bearer_tokens.size(), 1u);
+}
+
+TEST_F(ConfigLoaderTest, AllowsNonLoopbackProxyWithExplicitUnsafeFlag) {
+    write_config(R"({
+        "proxy_host": "0.0.0.0",
+        "allow_unsafe_remote_proxy": true
+    })");
+    auto config = preprocessor::ConfigLoader::load(temp_path_);
+    EXPECT_EQ(config.proxy_host, "0.0.0.0");
+    EXPECT_TRUE(config.allow_unsafe_remote_proxy);
+}
+
+TEST_F(ConfigLoaderTest, RejectsIncompleteRateLimitConfig) {
+    write_config(R"({"proxy_rate_limit_tokens_per_second": 10})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsNegativeProxyMaxRequestBytes) {
+    write_config(R"({"proxy_max_request_bytes": -1})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}

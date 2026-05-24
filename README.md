@@ -448,10 +448,10 @@ Endpoints:
 - `POST /v1/chat/completions` - drop-in OpenAI chat completions; the proxy
   retrieves top-k relevant code chunks, injects them as a system message,
   forwards to `upstream_url`, caches the response by
-  `(model, prompt, chunk_ids)`.
+  `(model, compiled upstream request, chunk_ids)`.
 - `GET /healthz` - liveness check.
 - `GET /stats` - JSON snapshot of `ProxyMetrics` (tokens saved, cache hits,
-  upstream calls, errors).
+  upstream calls, errors). Protected by proxy auth when auth is configured.
 
 Phase 1 config keys (in addition to the Phase 0 ones):
 
@@ -466,6 +466,14 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `max_context_chars` | Cap on injected context | `8000` |
 | `upstream_url` | OpenAI-compatible URL to forward to | `https://api.openai.com/v1/chat/completions` |
 | `upstream_api_key` | Fallback bearer token if the client did not send one | — |
+| `proxy_auth_bearer_tokens` | Local proxy bearer-token allow-list | `[]` |
+| `proxy_auth_hmac_secret` | Local HMAC-SHA256 shared secret | `""` |
+| `proxy_auth_max_clock_skew_seconds` | Allowed HMAC timestamp skew | `300` |
+| `proxy_rate_limit_tokens_per_second` | Per-caller proxy token refill rate (`0` = disabled) | `0` |
+| `proxy_rate_limit_burst` | Per-caller proxy burst size (`0` = disabled) | `0` |
+| `proxy_max_request_bytes` | Max chat-completions body size (`0` = disabled) | `8388608` |
+| `proxy_forward_client_authorization` | Forward client `Authorization` to upstream; defaults to `false` when local auth is configured unless set explicitly | `true` |
+| `allow_unsafe_remote_proxy` | Permit non-loopback unauthenticated serving | `false` |
 | `prompt_optimizer_enabled` | Enable Phase 2 per-bucket prompt rewriting | `false` |
 | `prompt_templates_path` | Optional JSON file overriding bucket templates | *(empty)* |
 | `include_project_card` | Inject the `ProjectCard` summary into the system prompt | `true` |
@@ -476,6 +484,14 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `prompt_rewriter_kind` | `"heuristic"` (always available) or `"llama-cpp"` (requires `LLM_PREPROCESSOR_WITH_LLAMA_CPP`) | `"heuristic"` |
 | `prompt_rewriter_max_chars` | Soft char cap for the rewriter (`0` = inherit `max_context_chars`) | `0` |
 | `llama_model_path` | Path to a `.gguf` model when `prompt_rewriter_kind == "llama-cpp"` | — |
+
+By default, `proxy_host` is loopback-only. Binding to `0.0.0.0`, a LAN IP, or
+another non-loopback address requires either local proxy auth
+(`proxy_auth_bearer_tokens` or `proxy_auth_hmac_secret`) or the explicit
+`allow_unsafe_remote_proxy=true` override. Local bearer auth accepts
+`X-Preprocessor-Authorization: Bearer <token>` or `Authorization: Bearer
+<token>`. Prefer the `X-Preprocessor-*` headers when the client also needs to
+send an upstream provider key in `Authorization`.
 
 When `api_model` is set in config, payloads are emitted as complete API request bodies (`{model, messages, temperature, max_tokens}`). Without it, the old messages-only format is used.
 

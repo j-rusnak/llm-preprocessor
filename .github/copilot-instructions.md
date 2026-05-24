@@ -134,9 +134,11 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   compare). `verify(authorization, signature, timestamp, body,
   now_unix=0)` honours `max_clock_skew`. `RateLimiter`
   token-bucket per caller key with `tokens_per_second` / `burst`
-  knobs (0/0 = disabled). `main.cpp` gains a `--health` flag that
-  validates config + ONNX assets and exits non-zero on missing
-  files. No new vcpkg deps. Full ctest and smoke suites pass.
+  knobs (0/0 = disabled). `ConfigLoader` and `OpenAIProxy` wire auth,
+  rate limiting, max request bytes, and unsafe non-loopback guards into
+  `--serve`; `main.cpp` also has a `--health` flag that validates config +
+  ONNX assets and exits non-zero on missing files. No new vcpkg deps. Full
+  ctest and smoke suites pass.
 - **Effectiveness harness (DONE):**
   `benchmarks/effectiveness_runner.cpp` standalone runner emits a
   JSON report (stdout) + human summary table (stderr) covering every

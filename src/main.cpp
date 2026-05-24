@@ -22,6 +22,7 @@
 #include "tokenizer.hpp"
 
 #include <cstring>
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -94,6 +95,15 @@ static int run_serve(const preprocessor::Config& config) {
     pcfg.upstream_api_key = config.upstream_api_key;
     pcfg.retrieval_k = config.retrieval_k;
     pcfg.max_context_chars = config.max_context_chars;
+    pcfg.auth.bearer_tokens.insert(config.proxy_auth_bearer_tokens.begin(),
+                                   config.proxy_auth_bearer_tokens.end());
+    pcfg.auth.hmac_secret = config.proxy_auth_hmac_secret;
+    pcfg.auth.max_clock_skew =
+        std::chrono::seconds{config.proxy_auth_max_clock_skew_seconds};
+    pcfg.rate_limit.tokens_per_second = config.proxy_rate_limit_tokens_per_second;
+    pcfg.rate_limit.burst = config.proxy_rate_limit_burst;
+    pcfg.max_request_bytes = config.proxy_max_request_bytes;
+    pcfg.forward_client_authorization = config.proxy_forward_client_authorization;
 
     preprocessor::OpenAIProxy proxy(index, cache, metrics, llm_tokenizer, pcfg);
 
