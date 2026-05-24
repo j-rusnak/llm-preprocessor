@@ -158,4 +158,44 @@ std::size_t PromptCache::size() const {
     return n;
 }
 
+std::vector<PromptCacheEntry> PromptCache::snapshot(std::size_t limit) const {
+    std::string sql = "SELECT key, payload FROM cache";
+    if (ttl_seconds_ > 0) {
+        sql += " WHERE created_at >= ?";
+    }
+    sql += " ORDER BY created_at DESC, rowid DESC";
+    if (limit > 0) {
+        sql += " LIMIT ?";
+    }
+    sql += ";";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(std::string("PromptCache snapshot: ") + sqlite3_errmsg(db_));
+    }
+
+    int param = 1;
+    if (ttl_seconds_ > 0) {
+        const auto min_created =
+            now_seconds() - static_cast<std::int64_t>(ttl_seconds_);
+        sqlite3_bind_int64(stmt, param++, min_created);
+    }
+    if (limit > 0) {
+        sqlite3_bind_int64(stmt, param++, static_cast<sqlite3_int64>(limit));
+    }
+
+    std::vector<PromptCacheEntry> out;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char* key = sqlite3_column_text(stmt, 0);
+        const unsigned char* payload = sqlite3_column_text(stmt, 1);
+        if (!key || !payload) continue;
+        out.push_back({
+            reinterpret_cast<const char*>(key),
+            reinterpret_cast<const char*>(payload)
+        });
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
 } // namespace preprocessor

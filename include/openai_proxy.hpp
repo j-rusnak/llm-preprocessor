@@ -2,6 +2,7 @@
 
 #include "auth_middleware.hpp"
 #include "rate_limiter.hpp"
+#include "sync_endpoint.hpp"
 
 #include <cstddef>
 #include <memory>
@@ -63,6 +64,9 @@ struct OpenAIProxyConfig {
     /// Optional multi-tier upstream router. Caller owns this object and must
     /// keep it alive for the lifetime of the proxy.
     const ModelRouter* model_router = nullptr;
+
+    /// Maximum cache entries returned by GET /sync/cache. 0 = no limit.
+    std::size_t sync_cache_export_limit = 1000;
 };
 
 /// OpenAI-compatible HTTP proxy.
@@ -76,6 +80,8 @@ struct OpenAIProxyConfig {
 ///                                and returns the upstream JSON verbatim.
 ///   GET  /stats                - JSON snapshot of `ProxyMetrics`.
 ///   GET  /healthz              - liveness probe.
+///   GET  /sync/cache           - export a cache bundle.
+///   POST /sync/cache           - import a cache bundle.
 ///
 /// The proxy is intended to be a drop-in middleware for tools like Cursor or
 /// Continue: point their OpenAI base URL at `http://127.0.0.1:<port>` and the
@@ -145,6 +151,7 @@ private:
     IPromptRewriter* rewriter_ = nullptr;
     AuthMiddleware auth_;
     RateLimiter rate_limiter_;
+    SyncEndpoint sync_;
     std::unique_ptr<httplib::Server> server_;
 };
 

@@ -177,6 +177,7 @@ TEST_F(ConfigLoaderTest, LoadsProxySecuritySettings) {
         "proxy_rate_limit_tokens_per_second": 12.5,
         "proxy_rate_limit_burst": 30,
         "proxy_max_request_bytes": 1048576,
+        "sync_cache_export_limit": 25,
         "proxy_forward_client_authorization": false,
         "allow_unsafe_remote_proxy": false
     })");
@@ -190,6 +191,7 @@ TEST_F(ConfigLoaderTest, LoadsProxySecuritySettings) {
     EXPECT_DOUBLE_EQ(config.proxy_rate_limit_tokens_per_second, 12.5);
     EXPECT_DOUBLE_EQ(config.proxy_rate_limit_burst, 30.0);
     EXPECT_EQ(config.proxy_max_request_bytes, 1048576u);
+    EXPECT_EQ(config.sync_cache_export_limit, 25u);
     EXPECT_FALSE(config.proxy_forward_client_authorization);
     EXPECT_FALSE(config.allow_unsafe_remote_proxy);
 }

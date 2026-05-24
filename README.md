@@ -454,6 +454,10 @@ Endpoints:
 - `GET /healthz` - liveness check.
 - `GET /stats` - JSON snapshot of `ProxyMetrics` (tokens saved, cache hits,
   upstream calls, errors). Protected by proxy auth when auth is configured.
+- `GET /sync/cache` - export a `SyncBundle` containing recent cache entries.
+  Protected by proxy auth when auth is configured.
+- `POST /sync/cache` - import cache entries from a peer `SyncBundle`.
+  Protected by proxy auth when auth is configured.
 
 Phase 1 config keys (in addition to the Phase 0 ones):
 
@@ -476,6 +480,7 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `proxy_rate_limit_tokens_per_second` | Per-caller proxy token refill rate (`0` = disabled) | `0` |
 | `proxy_rate_limit_burst` | Per-caller proxy burst size (`0` = disabled) | `0` |
 | `proxy_max_request_bytes` | Max chat-completions body size (`0` = disabled) | `8388608` |
+| `sync_cache_export_limit` | Max cache entries returned by `GET /sync/cache` (`0` = unlimited) | `1000` |
 | `proxy_forward_client_authorization` | Forward client `Authorization` to upstream; defaults to `false` when local auth is configured unless set explicitly | `true` |
 | `allow_unsafe_remote_proxy` | Permit non-loopback unauthenticated serving | `false` |
 | `prompt_optimizer_enabled` | Enable Phase 2 per-bucket prompt rewriting | `false` |

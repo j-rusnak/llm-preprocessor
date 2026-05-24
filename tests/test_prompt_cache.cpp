@@ -53,6 +53,20 @@ TEST(PromptCache, EraseAndClear) {
     EXPECT_EQ(c.size(), 0u);
 }
 
+TEST(PromptCache, SnapshotReturnsNewestEntriesUpToLimit) {
+    PromptCache c(":memory:");
+    c.put("a", "1");
+    c.put("b", "2");
+
+    auto all = c.snapshot();
+    ASSERT_EQ(all.size(), 2u);
+
+    auto limited = c.snapshot(1);
+    ASSERT_EQ(limited.size(), 1u);
+    EXPECT_EQ(limited[0].key, "b");
+    EXPECT_EQ(limited[0].payload, "2");
+}
+
 TEST(PromptCache, TTLExpires) {
     PromptCache c(":memory:", /*ttl_seconds=*/1);
     c.put("k", "v");

@@ -9,6 +9,11 @@ struct sqlite3;
 
 namespace preprocessor {
 
+struct PromptCacheEntry {
+    std::string key;
+    std::string payload;
+};
+
 /// SQLite-backed result cache for upstream LLM responses.
 ///
 /// Key derivation (`make_key`) is content-addressed:
@@ -54,6 +59,9 @@ public:
 
     /// Current row count.
     std::size_t size() const;
+
+    /// Snapshot cache entries, newest first. `limit == 0` means no limit.
+    std::vector<PromptCacheEntry> snapshot(std::size_t limit = 0) const;
 
 private:
     sqlite3* db_ = nullptr;

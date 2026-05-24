@@ -77,6 +77,31 @@ std::string rate_limit_key(const httplib::Request& req) {
     return "anonymous";
 }
 
+bool enforce_proxy_controls(const httplib::Request& req,
+                            httplib::Response& res,
+                            const AuthMiddleware& auth,
+                            RateLimiter& rate_limiter,
+                            const std::string& body) {
+    if (auth.enabled()) {
+        const std::string auth_header =
+            first_header(req, "X-Preprocessor-Authorization", "Authorization");
+        const std::string signature =
+            first_header(req, "X-Preprocessor-Signature", "X-Signature");
+        const std::string timestamp =
+            first_header(req, "X-Preprocessor-Timestamp", "X-Timestamp");
+        if (!auth.verify(auth_header, signature, timestamp, body)) {
+            set_json_error(res, 401, "unauthorized",
+                           "missing or invalid proxy authentication");
+            return false;
+        }
+    }
+    if (rate_limiter.enabled() && !rate_limiter.try_acquire(rate_limit_key(req))) {
+        set_json_error(res, 429, "rate_limited", "proxy rate limit exceeded");
+        return false;
+    }
+    return true;
+}
+
 /// Forward a JSON body to the upstream chat-completions endpoint via libcurl.
 /// `incoming_auth` is the Authorization header from the client request (may be
 /// empty). `fallback_key` is used when the client provided none.
@@ -297,25 +322,60 @@ void OpenAIProxy::install_routes() {
     });
 
     server_->Get("/stats", [this](const httplib::Request& req, httplib::Response& res) {
-        if (auth_.enabled()) {
-            const std::string auth_header =
-                first_header(req, "X-Preprocessor-Authorization", "Authorization");
-            const std::string signature =
-                first_header(req, "X-Preprocessor-Signature", "X-Signature");
-            const std::string timestamp =
-                first_header(req, "X-Preprocessor-Timestamp", "X-Timestamp");
-            if (!auth_.verify(auth_header, signature, timestamp, "")) {
-                set_json_error(res, 401, "unauthorized",
-                               "missing or invalid proxy authentication");
-                return;
-            }
-        }
-        if (rate_limiter_.enabled() && !rate_limiter_.try_acquire(rate_limit_key(req))) {
-            set_json_error(res, 429, "rate_limited",
-                           "proxy rate limit exceeded");
+        if (!enforce_proxy_controls(req, res, auth_, rate_limiter_, "")) {
             return;
         }
         res.set_content(metrics_.snapshot().dump(2), "application/json");
+    });
+
+    server_->Get("/sync/cache", [this](const httplib::Request& req,
+                                       httplib::Response& res) {
+        if (!enforce_proxy_controls(req, res, auth_, rate_limiter_, "")) {
+            return;
+        }
+
+        SyncBundle bundle;
+        try {
+            for (const auto& entry :
+                 cache_.snapshot(config_.sync_cache_export_limit)) {
+                bundle.cache.push_back({entry.key, entry.payload});
+            }
+            sync_.note_export();
+            res.set_content(sync_.to_json(bundle), "application/json");
+        } catch (const std::exception& e) {
+            set_json_error(res, 500, "sync_export_failed", e.what());
+        }
+    });
+
+    server_->Post("/sync/cache", [this](const httplib::Request& req,
+                                        httplib::Response& res) {
+        if (config_.max_request_bytes > 0 &&
+            req.body.size() > config_.max_request_bytes) {
+            set_json_error(res, 413, "request_too_large",
+                           "request body exceeds proxy_max_request_bytes");
+            return;
+        }
+        if (!enforce_proxy_controls(req, res, auth_, rate_limiter_, req.body)) {
+            return;
+        }
+
+        auto parsed = json::parse(req.body, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object()) {
+            set_json_error(res, 400, "invalid_json",
+                           "sync bundle must be a JSON object");
+            return;
+        }
+
+        try {
+            SyncBundle bundle = sync_.from_json(req.body);
+            const std::size_t applied = sync_.apply_to_cache(bundle, &cache_);
+            res.set_content(
+                json{{"applied_cache_entries", applied},
+                     {"bundles_imported", sync_.bundles_imported()}}.dump(),
+                "application/json");
+        } catch (const std::exception& e) {
+            set_json_error(res, 400, "invalid_sync_bundle", e.what());
+        }
     });
 
     server_->Post("/v1/chat/completions",

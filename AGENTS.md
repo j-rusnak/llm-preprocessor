@@ -47,12 +47,12 @@ effectiveness before claiming completion.
 
 ## Current Production Priorities
 
-1. Add authenticated sync routes for `SyncEndpoint`.
-2. Clean tracked generated artifacts and package distribution.
-3. Improve retrieval quality with case-preserving structural queries, stronger
+1. Clean tracked generated artifacts and package distribution.
+2. Improve retrieval quality with case-preserving structural queries, stronger
    symbol extraction, and model-accurate token budgeting.
-4. Add protocol edge cases: streaming structural fast path, upstream error
+3. Add protocol edge cases: streaming structural fast path, upstream error
    propagation, and client disconnect handling.
+4. Add vector snapshot/export support before wiring `/sync/vectors`.
 
 ## Security Notes
 

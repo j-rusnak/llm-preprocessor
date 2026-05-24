@@ -104,6 +104,7 @@ static int run_serve(const preprocessor::Config& config) {
     pcfg.rate_limit.tokens_per_second = config.proxy_rate_limit_tokens_per_second;
     pcfg.rate_limit.burst = config.proxy_rate_limit_burst;
     pcfg.max_request_bytes = config.proxy_max_request_bytes;
+    pcfg.sync_cache_export_limit = config.sync_cache_export_limit;
     pcfg.forward_client_authorization = config.proxy_forward_client_authorization;
 
     std::unique_ptr<preprocessor::ModelRouter> model_router;
