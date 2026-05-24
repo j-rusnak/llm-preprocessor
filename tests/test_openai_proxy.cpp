@@ -12,6 +12,7 @@
 #include <chrono>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
+#include <string>
 #include <thread>
 
 using nlohmann::json;
@@ -45,6 +46,7 @@ struct FakeUpstream {
     std::atomic<int> calls{0};
     std::string last_body;
     std::string last_authorization;
+    bool streaming_response = false;
 
     FakeUpstream() : server(std::make_shared<httplib::Server>()) {
         server->Post("/v1/chat/completions",
@@ -54,6 +56,23 @@ struct FakeUpstream {
             last_authorization = req.has_header("Authorization")
                 ? req.get_header_value("Authorization")
                 : std::string{};
+            if (streaming_response) {
+                res.set_chunked_content_provider(
+                    "text/event-stream",
+                    [](std::size_t, httplib::DataSink& sink) {
+                        const std::string first =
+                            "data: {\"choices\":[{\"delta\":{\"content\":\"he\"}}]}\n\n";
+                        const std::string second =
+                            "data: {\"choices\":[{\"delta\":{\"content\":\"llo\"}}]}\n\n";
+                        const std::string done = "data: [DONE]\n\n";
+                        if (!sink.write(first.data(), first.size())) return false;
+                        if (!sink.write(second.data(), second.size())) return false;
+                        if (!sink.write(done.data(), done.size())) return false;
+                        sink.done();
+                        return true;
+                    });
+                return;
+            }
             json out = {
                 {"id", "fake-1"},
                 {"object", "chat.completion"},
@@ -282,4 +301,53 @@ TEST(OpenAIProxy, RequestBodyTooLargeReturns413BeforeUpstream) {
     ASSERT_TRUE(r);
     EXPECT_EQ(r->status, 413);
     EXPECT_EQ(up.calls.load(), 0);
+}
+
+TEST(OpenAIProxy, StreamingForwardsSseWithEventStreamContentType) {
+    ProxyHarness h;
+    FakeUpstream up;
+    up.streaming_response = true;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions");
+
+    json body = {
+        {"model", "gpt-test"},
+        {"stream", true},
+        {"messages", json::array({{{"role", "user"}, {"content", "say hello"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+    EXPECT_EQ(r->get_header_value("Content-Type"), "text/event-stream");
+    EXPECT_NE(r->body.find("data: {\"choices\""), std::string::npos);
+    EXPECT_NE(r->body.find("data: [DONE]"), std::string::npos);
+    EXPECT_EQ(up.calls.load(), 1);
+
+    auto forwarded = json::parse(up.last_body);
+    EXPECT_TRUE(forwarded.value("stream", false));
+}
+
+TEST(OpenAIProxy, StreamingRequestsAreNotServedFromPromptCache) {
+    ProxyHarness h;
+    FakeUpstream up;
+    up.streaming_response = true;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions");
+
+    json body = {
+        {"model", "gpt-test"},
+        {"stream", true},
+        {"messages", json::array({{{"role", "user"}, {"content", "say hello"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r1 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    ASSERT_TRUE(r1);
+    EXPECT_EQ(r1->status, 200);
+
+    auto r2 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    ASSERT_TRUE(r2);
+    EXPECT_EQ(r2->status, 200);
+    EXPECT_EQ(up.calls.load(), 2);
 }

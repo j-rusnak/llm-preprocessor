@@ -449,6 +449,8 @@ Endpoints:
   retrieves top-k relevant code chunks, injects them as a system message,
   forwards to `upstream_url`, caches the response by
   `(model, compiled upstream request, chunk_ids)`.
+  Requests with `"stream": true` are forwarded as `text/event-stream` and are
+  not cached.
 - `GET /healthz` - liveness check.
 - `GET /stats` - JSON snapshot of `ProxyMetrics` (tokens saved, cache hits,
   upstream calls, errors). Protected by proxy auth when auth is configured.

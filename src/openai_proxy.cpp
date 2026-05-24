@@ -41,6 +41,17 @@ struct UpstreamResponse {
     std::string body;
 };
 
+struct StreamingSink {
+    httplib::DataSink* sink = nullptr;
+};
+
+std::size_t curl_stream_cb(char* ptr, std::size_t size, std::size_t nmemb, void* userdata) {
+    auto* out = static_cast<StreamingSink*>(userdata);
+    const std::size_t bytes = size * nmemb;
+    if (!out || !out->sink) return 0;
+    return out->sink->write(ptr, bytes) ? bytes : 0;
+}
+
 void set_json_error(httplib::Response& res, int status,
                     const std::string& type,
                     const std::string& message) {
@@ -107,6 +118,58 @@ UpstreamResponse forward_upstream(const std::string& url,
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return resp;
+}
+
+void write_sse_error(httplib::DataSink& sink, const std::string& message) {
+    const std::string event =
+        "event: error\n"
+        "data: " + json{{"error", message}}.dump() + "\n\n";
+    sink.write(event.data(), event.size());
+}
+
+bool stream_upstream(const std::string& url,
+                     const std::string& body,
+                     const std::string& incoming_auth,
+                     const std::string& fallback_key,
+                     long timeout_seconds,
+                     httplib::DataSink& sink) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        write_sse_error(sink, "curl_easy_init failed");
+        sink.done();
+        return true;
+    }
+
+    StreamingSink stream{&sink};
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_stream_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &stream);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    headers = curl_slist_append(headers, "Accept: text/event-stream");
+    std::string auth;
+    if (!incoming_auth.empty()) {
+        auth = "Authorization: " + incoming_auth;
+    } else if (!fallback_key.empty()) {
+        auth = "Authorization: Bearer " + fallback_key;
+    }
+    if (!auth.empty()) headers = curl_slist_append(headers, auth.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+    CURLcode rc = curl_easy_perform(curl);
+    if (rc != CURLE_OK) {
+        write_sse_error(sink, std::string("upstream: ") + curl_easy_strerror(rc));
+    }
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    sink.done();
+    return true;
 }
 
 /// Extract the last user message string from an OpenAI-style messages array.
@@ -301,6 +364,7 @@ void OpenAIProxy::install_routes() {
         }
 
         const std::string model = body.value("model", std::string{"unknown"});
+        const bool stream = body.value("stream", false);
         std::string user_msg = TextSanitizer::sanitize(last_user_message(body["messages"]));
 
         // Phase 3: zero-LLM fast path for purely structural questions.
@@ -388,24 +452,43 @@ void OpenAIProxy::install_routes() {
         // messages, optimiser output, and rewritten context all affect the
         // response and must participate in cache identity.
         const std::string cache_key = PromptCache::make_key(model, compiled, chunk_ids);
-        if (auto cached = cache_.get(cache_key)) {
-            metrics_.on_cache_hit();
-            res.set_content(*cached, "application/json");
-            return;
+        if (!stream) {
+            if (auto cached = cache_.get(cache_key)) {
+                metrics_.on_cache_hit();
+                res.set_content(*cached, "application/json");
+                return;
+            }
         }
 
         const std::size_t compiled_tokens = tokenizer_.count_tokens(compiled);
         metrics_.observe_tokens(original_tokens, compiled_tokens);
 
+        std::string incoming_auth;
+        if (config_.forward_client_authorization &&
+            req.has_header("Authorization")) {
+            incoming_auth = req.get_header_value("Authorization");
+        }
+
+        if (stream) {
+            metrics_.on_upstream_call();
+            const auto upstream_url = config_.upstream_url;
+            const auto fallback_key = config_.upstream_api_key;
+            const auto timeout_seconds = config_.upstream_timeout_seconds;
+            res.set_header("Cache-Control", "no-cache");
+            res.set_chunked_content_provider(
+                "text/event-stream",
+                [upstream_url, compiled, incoming_auth, fallback_key, timeout_seconds]
+                (std::size_t, httplib::DataSink& sink) {
+                    return stream_upstream(upstream_url, compiled, incoming_auth,
+                                           fallback_key, timeout_seconds, sink);
+                });
+            return;
+        }
+
         // Forward to upstream.
         UpstreamResponse up;
         try {
             metrics_.on_upstream_call();
-            std::string incoming_auth;
-            if (config_.forward_client_authorization &&
-                req.has_header("Authorization")) {
-                incoming_auth = req.get_header_value("Authorization");
-            }
             up = forward_upstream(config_.upstream_url, compiled, incoming_auth,
                                   config_.upstream_api_key,
                                   config_.upstream_timeout_seconds);
