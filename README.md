@@ -141,8 +141,8 @@ modules round out the production stack:
   cold start.
 - **Phase 8 - `ModelRouter`.** Picks a `cheap` / `medium` / `frontier`
   upstream per turn from intent bucket + request size. Tiers and
-  routes are registered programmatically; plays nicely with
-  `PromptCache` (cache key already includes model id).
+  routes can be configured for `--serve`; the proxy rewrites the upstream
+  URL, model name, optional API key, and context cap before caching/forwarding.
 - **Phase 9 - `AbHarness`.** Sticky-hash A/B variant assignment for
   prompt templates and rewriter knobs. Deterministic per
   `(experiment_id, sticky_key)` via xxhash64; tracks hit counts.
@@ -468,6 +468,8 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `max_context_chars` | Cap on injected context | `8000` |
 | `upstream_url` | OpenAI-compatible URL to forward to | `https://api.openai.com/v1/chat/completions` |
 | `upstream_api_key` | Fallback bearer token if the client did not send one | — |
+| `model_tiers` | Optional array of `{name, upstream_url, model_name, api_key, max_context}` tier definitions | `[]` |
+| `model_routes` | Optional ordered array of `{bucket, min_request_chars, max_request_chars, tier}` routing rules | `[]` |
 | `proxy_auth_bearer_tokens` | Local proxy bearer-token allow-list | `[]` |
 | `proxy_auth_hmac_secret` | Local HMAC-SHA256 shared secret | `""` |
 | `proxy_auth_max_clock_skew_seconds` | Allowed HMAC timestamp skew | `300` |
@@ -494,6 +496,24 @@ another non-loopback address requires either local proxy auth
 `X-Preprocessor-Authorization: Bearer <token>` or `Authorization: Bearer
 <token>`. Prefer the `X-Preprocessor-*` headers when the client also needs to
 send an upstream provider key in `Authorization`.
+
+Multi-tier routing is ordered, first-match wins. Buckets are `code_edit`,
+`code_explain`, `code_generate`, `meta_query`, and `freeform`; request-size
+bounds are character counts from the incoming request body. Tier `upstream_url`,
+`api_key`, and `max_context` are optional overrides; `model_name` is required.
+
+```json
+{
+  "model_tiers": [
+    {"name": "cheap", "model_name": "gpt-4o-mini"},
+    {"name": "frontier", "model_name": "gpt-4.1", "api_key": "frontier-key"}
+  ],
+  "model_routes": [
+    {"bucket": "code_explain", "max_request_chars": 12000, "tier": "cheap"},
+    {"bucket": "code_edit", "tier": "frontier"}
+  ]
+}
+```
 
 When `api_model` is set in config, payloads are emitted as complete API request bodies (`{model, messages, temperature, max_tokens}`). Without it, the old messages-only format is used.
 

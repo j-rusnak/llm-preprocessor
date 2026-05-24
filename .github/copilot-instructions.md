@@ -100,9 +100,9 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   upstream_url, model_name, api_key, max_context}` + `ModelRoute{
   PromptBucket bucket, min/max_request_chars, tier}`. `ModelRouter`
   with `add_tier` / `add_route` / `route(bucket, chars)` /
-  `tier(name)`. Plays nicely with `PromptCache` because the cache key includes
-  model id and the full compiled upstream request. Thread-safe via `std::mutex`. No new vcpkg
-  deps.
+  `tier(name)`. Config keys: `model_tiers` and ordered `model_routes`.
+  `OpenAIProxy` applies the selected tier before cache lookup and forwarding.
+  Thread-safe via `std::mutex`. No new vcpkg deps.
 - **Phase 9 (DONE):** Telemetry-driven prompt evolution - `AbHarness`
   with `AbVariant{name, weight}` + `AbExperiment{id, variants}`.
   `define(experiment)` rejects empty / all-zero-weight inputs.

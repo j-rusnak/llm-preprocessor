@@ -1,6 +1,7 @@
 #include "code_chunker.hpp"
 #include "i_embedding_engine.hpp"
 #include "llm_tokenizer.hpp"
+#include "model_router.hpp"
 #include "openai_proxy.hpp"
 #include "prompt_cache.hpp"
 #include "proxy_metrics.hpp"
@@ -350,4 +351,45 @@ TEST(OpenAIProxy, StreamingRequestsAreNotServedFromPromptCache) {
     ASSERT_TRUE(r2);
     EXPECT_EQ(r2->status, 200);
     EXPECT_EQ(up.calls.load(), 2);
+}
+
+TEST(OpenAIProxy, ModelRouterSelectsTierAndRewritesForwardedRequest) {
+    ProxyHarness h;
+    FakeUpstream default_upstream;
+    FakeUpstream routed_upstream;
+
+    preprocessor::ModelRouter router;
+    router.add_tier({
+        "frontier",
+        "http://127.0.0.1:" + std::to_string(routed_upstream.port) + "/v1/chat/completions",
+        "gpt-frontier",
+        "tier-token",
+        0
+    });
+    router.add_route({preprocessor::PromptBucket::CodeEdit, 0, 0, "frontier"});
+
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.model_router = &router;
+    cfg.upstream_api_key = "default-token";
+    cfg.forward_client_authorization = false;
+    h.start("http://127.0.0.1:" + std::to_string(default_upstream.port) +
+                "/v1/chat/completions",
+            cfg);
+
+    json body = {
+        {"model", "gpt-original"},
+        {"messages", json::array({{{"role", "user"}, {"content", "fix this bug"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+    EXPECT_EQ(default_upstream.calls.load(), 0);
+    EXPECT_EQ(routed_upstream.calls.load(), 1);
+    EXPECT_EQ(routed_upstream.last_authorization, "Bearer tier-token");
+
+    auto forwarded = json::parse(routed_upstream.last_body);
+    EXPECT_EQ(forwarded["model"], "gpt-frontier");
 }

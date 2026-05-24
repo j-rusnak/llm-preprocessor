@@ -47,12 +47,12 @@ effectiveness before claiming completion.
 
 ## Current Production Priorities
 
-1. Finish protocol parity: true SSE streaming for chat completions.
-2. Wire runtime `ModelRouter` into config and proxy forwarding.
-3. Add authenticated sync routes for `SyncEndpoint`.
-4. Clean tracked generated artifacts and package distribution.
-5. Improve retrieval quality with case-preserving structural queries, stronger
+1. Add authenticated sync routes for `SyncEndpoint`.
+2. Clean tracked generated artifacts and package distribution.
+3. Improve retrieval quality with case-preserving structural queries, stronger
    symbol extraction, and model-accurate token budgeting.
+4. Add protocol edge cases: streaming structural fast path, upstream error
+   propagation, and client disconnect handling.
 
 ## Security Notes
 
@@ -62,4 +62,3 @@ effectiveness before claiming completion.
 - `/healthz` may stay public; `/stats` and sync/team routes should be protected
   when proxy auth is configured.
 - Enforce request-size limits before JSON parsing or upstream forwarding.
-

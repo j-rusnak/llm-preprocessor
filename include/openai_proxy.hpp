@@ -22,6 +22,7 @@ class PromptOptimizer;
 class IPromptRewriter;
 class SymbolGraph;
 class StructuralQueryEngine;
+class ModelRouter;
 
 /// Configuration for `OpenAIProxy`.
 struct OpenAIProxyConfig {
@@ -58,6 +59,10 @@ struct OpenAIProxyConfig {
     /// Forward the client's Authorization header to the upstream provider.
     /// Disable this when Authorization is used as a local proxy bearer token.
     bool forward_client_authorization = true;
+
+    /// Optional multi-tier upstream router. Caller owns this object and must
+    /// keep it alive for the lifetime of the proxy.
+    const ModelRouter* model_router = nullptr;
 };
 
 /// OpenAI-compatible HTTP proxy.

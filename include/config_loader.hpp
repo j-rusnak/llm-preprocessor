@@ -6,6 +6,8 @@
 #include <optional>
 #include <cstddef>
 
+#include "model_router.hpp"
+
 namespace preprocessor {
 
 struct Config {
@@ -33,6 +35,8 @@ struct Config {
     std::size_t max_context_chars = 8000;
     std::string upstream_url = "https://api.openai.com/v1/chat/completions";
     std::string upstream_api_key;
+    std::vector<ModelTier> model_tiers;
+    std::vector<ModelRoute> model_routes;
 
     // --- Phase 12: secure proxy runtime settings (all optional) ---
     std::vector<std::string> proxy_auth_bearer_tokens;

@@ -4,6 +4,7 @@
 #include <fstream>
 #include <limits>
 #include <stdexcept>
+#include <unordered_set>
 
 #include <nlohmann/json.hpp>
 
@@ -27,6 +28,25 @@ bool is_loopback_host(const std::string& host) {
 bool proxy_auth_enabled(const Config& config) {
     return !config.proxy_auth_bearer_tokens.empty() ||
            !config.proxy_auth_hmac_secret.empty();
+}
+
+bool is_prompt_bucket_name(const std::string& name) {
+    return name == "code_edit" ||
+           name == "code_explain" ||
+           name == "code_generate" ||
+           name == "meta_query" ||
+           name == "freeform";
+}
+
+std::string required_string_field(const nlohmann::json& j,
+                                  const char* object_name,
+                                  const char* field_name) {
+    if (!j.contains(field_name) || !j[field_name].is_string() ||
+        j[field_name].get<std::string>().empty()) {
+        throw std::invalid_argument(std::string(object_name) + "." +
+                                    field_name + " must be a non-empty string");
+    }
+    return j[field_name].get<std::string>();
 }
 
 std::size_t read_size_t_field(const nlohmann::json& j,
@@ -120,6 +140,63 @@ Config ConfigLoader::load(const std::string& filepath) {
     config.max_context_chars = j.value("max_context_chars", config.max_context_chars);
     config.upstream_url = j.value("upstream_url", config.upstream_url);
     config.upstream_api_key = j.value("upstream_api_key", config.upstream_api_key);
+
+    std::unordered_set<std::string> model_tier_names;
+    if (j.contains("model_tiers")) {
+        if (!j["model_tiers"].is_array()) {
+            throw std::invalid_argument("model_tiers must be an array");
+        }
+        for (const auto& item : j["model_tiers"]) {
+            if (!item.is_object()) {
+                throw std::invalid_argument("model_tiers entries must be objects");
+            }
+            ModelTier tier;
+            tier.name = required_string_field(item, "model_tiers[]", "name");
+            tier.model_name =
+                required_string_field(item, "model_tiers[]", "model_name");
+            tier.upstream_url = item.value("upstream_url", std::string{});
+            tier.api_key = item.value("api_key", std::string{});
+            tier.max_context = read_size_t_field(item, "max_context", 0);
+            if (!model_tier_names.insert(tier.name).second) {
+                throw std::invalid_argument("model_tiers names must be unique");
+            }
+            config.model_tiers.push_back(std::move(tier));
+        }
+    }
+
+    if (j.contains("model_routes")) {
+        if (!j["model_routes"].is_array()) {
+            throw std::invalid_argument("model_routes must be an array");
+        }
+        for (const auto& item : j["model_routes"]) {
+            if (!item.is_object()) {
+                throw std::invalid_argument("model_routes entries must be objects");
+            }
+            const std::string bucket =
+                required_string_field(item, "model_routes[]", "bucket");
+            if (!is_prompt_bucket_name(bucket)) {
+                throw std::invalid_argument("model_routes[].bucket is unknown");
+            }
+
+            ModelRoute route;
+            route.bucket = bucket_from_string(bucket);
+            route.min_request_chars =
+                read_size_t_field(item, "min_request_chars", 0);
+            route.max_request_chars =
+                read_size_t_field(item, "max_request_chars", 0);
+            if (route.max_request_chars > 0 &&
+                route.min_request_chars > route.max_request_chars) {
+                throw std::invalid_argument(
+                    "model_routes min_request_chars must be <= max_request_chars");
+            }
+            route.tier = required_string_field(item, "model_routes[]", "tier");
+            if (model_tier_names.find(route.tier) == model_tier_names.end()) {
+                throw std::invalid_argument(
+                    "model_routes[].tier must reference a configured model_tier");
+            }
+            config.model_routes.push_back(std::move(route));
+        }
+    }
     if (config.proxy_port < 0 || config.proxy_port > 65535) {
         throw std::invalid_argument("proxy_port must be 0-65535");
     }
