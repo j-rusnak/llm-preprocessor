@@ -206,6 +206,8 @@ explicit request.
   is cross-module, also extend `tests/smoke_runner.cpp` with a stage.
 - Significant changes (new module, new dep, architecture pivot, build/setup
   changes) MUST update `README.md` and this file.
+- Streaming chat-completions requests (`"stream": true`) must preserve
+  `text/event-stream` framing and must not read from or write to `PromptCache`.
 - Keep `main.cpp` thin - it only wires modules together and runs the loop.
 - Latency is a feature. Prefer batched / mmap / zero-copy paths over clever
   abstractions. Profile before optimising; benchmark via `benchmark_runner`.

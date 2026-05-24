@@ -227,6 +227,14 @@ curl -s http://127.0.0.1:8080/v1/chat/completions `
     -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"explain main()"}]}'
 ```
 
+Streaming requests preserve SSE framing and bypass `PromptCache`:
+
+```powershell
+curl -N http://127.0.0.1:8080/v1/chat/completions `
+    -H "Content-Type: application/json" `
+    -d '{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"explain main()"}]}'
+```
+
 ### 5.2 `McpServer` (Phase 4) — MCP over stdio
 
 ```powershell
