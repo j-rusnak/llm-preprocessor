@@ -34,7 +34,15 @@
 #ifndef PREPROCESSOR_VERSION
 #define PREPROCESSOR_VERSION "unknown"
 #endif
+#ifndef PREPROCESSOR_GIT_COMMIT
+#define PREPROCESSOR_GIT_COMMIT "unknown"
+#endif
+#ifndef PREPROCESSOR_BUILD_CONFIG
+#define PREPROCESSOR_BUILD_CONFIG "unknown"
+#endif
 static constexpr const char* VERSION = PREPROCESSOR_VERSION;
+static constexpr const char* GIT_COMMIT = PREPROCESSOR_GIT_COMMIT;
+static constexpr const char* BUILD_CONFIG = PREPROCESSOR_BUILD_CONFIG;
 
 static std::unique_ptr<preprocessor::ILLMTokenizer> make_llm_tokenizer(
     const preprocessor::Config& config) {
@@ -271,7 +279,8 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
-            std::cout << "LLM Preprocessor v" << VERSION << "\n";
+            std::cout << "LLM Preprocessor v" << VERSION
+                      << " (" << BUILD_CONFIG << ", commit " << GIT_COMMIT << ")\n";
             return 0;
         }
         if (std::strcmp(argv[i], "--serve") == 0) {

@@ -355,6 +355,14 @@ find_package(LLMPreprocessor CONFIG REQUIRED)
 target_link_libraries(my_tool PRIVATE LLMPreprocessor::preprocessor_lib)
 ```
 
+## Release Candidate Checks
+
+Before tagging a local beta/RC, run the release hygiene, build, test, smoke,
+effectiveness, version, and install checks in [docs/RELEASE.md](docs/RELEASE.md).
+Runtime assets such as `models/`, local SQLite databases, ONNX Runtime
+archives, and extracted ONNX Runtime directories must remain ignored and
+untracked.
+
 ## Testing
 
 Three complementary surfaces:

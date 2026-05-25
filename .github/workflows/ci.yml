@@ -6,39 +6,106 @@ on:
   pull_request:
 
 jobs:
-  windows:
-    name: Windows build and verification
-    runs-on: windows-latest
+  build:
+    name: ${{ matrix.name }} build and verification
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            ort_package: onnxruntime-win-x64
+            ort_archive_ext: zip
+            app_path: build/install-check/bin/preprocessor_app.exe
+            ort_install_path: build/install-check/bin/onnxruntime.dll
+            smoke_path: build/Debug/smoke_runner.exe
+            effectiveness_path: build/Debug/effectiveness_runner.exe
+            ctest_config_args: -C Debug
+          - name: Linux
+            os: ubuntu-latest
+            ort_package: onnxruntime-linux-x64
+            ort_archive_ext: tgz
+            app_path: build/install-check/bin/preprocessor_app
+            ort_install_path: build/install-check/lib/libonnxruntime.so
+            smoke_path: build/smoke_runner
+            effectiveness_path: build/effectiveness_runner
+            ctest_config_args: ""
+          - name: macOS
+            os: macos-latest
+            ort_package: onnxruntime-osx-universal2
+            ort_archive_ext: tgz
+            app_path: build/install-check/bin/preprocessor_app
+            ort_install_path: build/install-check/lib/libonnxruntime.dylib
+            smoke_path: build/smoke_runner
+            effectiveness_path: build/effectiveness_runner
+            ctest_config_args: ""
 
     env:
       ONNXRUNTIME_VERSION: "1.23.2"
       BUILD_TYPE: Debug
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Release hygiene
+        shell: pwsh
+        run: |
+          $trackedIgnored = git ls-files -ci --exclude-standard
+          if ($trackedIgnored) {
+            Write-Error "Tracked ignored files must be removed from the Git index:`n$($trackedIgnored -join "`n")"
+          }
+
       - name: Download ONNX Runtime
         shell: pwsh
         run: |
           $version = $env:ONNXRUNTIME_VERSION
-          $name = "onnxruntime-win-x64-$version"
-          $zip = "$name.zip"
-          $url = "https://github.com/microsoft/onnxruntime/releases/download/v$version/$zip"
+          $name = "${{ matrix.ort_package }}-$version"
+          $archive = "$name.${{ matrix.ort_archive_ext }}"
+          $url = "https://github.com/microsoft/onnxruntime/releases/download/v$version/$archive"
           if (Test-Path -LiteralPath $name) {
             Remove-Item -LiteralPath $name -Recurse -Force
           }
-          if (Test-Path -LiteralPath $zip) {
-            Remove-Item -LiteralPath $zip -Force
+          if (Test-Path -LiteralPath $archive) {
+            Remove-Item -LiteralPath $archive -Force
           }
-          Invoke-WebRequest -Uri $url -OutFile $zip
-          Expand-Archive -LiteralPath $zip -DestinationPath . -Force
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          if ("${{ matrix.ort_archive_ext }}" -eq "zip") {
+            Expand-Archive -LiteralPath $archive -DestinationPath . -Force
+          } else {
+            tar -xzf $archive
+          }
+          if ($IsLinux) {
+            "LD_LIBRARY_PATH=$pwd/$name/lib" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } elseif ($IsMacOS) {
+            "DYLD_LIBRARY_PATH=$pwd/$name/lib" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+
+      - name: Set up vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
+          if ($IsWindows) {
+            & "$env:VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
+          } else {
+            & "$env:VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+          }
 
       - name: Configure
         shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          $cmakeArgs = @(
+            "-S", ".",
+            "-B", "build",
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake",
+            "-DCMAKE_BUILD_TYPE=$env:BUILD_TYPE"
+          )
+          if ($IsWindows) {
+            $cmakeArgs += @("-G", "Visual Studio 17 2022", "-A", "x64")
+          }
+          cmake @cmakeArgs
 
       - name: Build
         shell: pwsh
@@ -49,8 +116,8 @@ jobs:
         run: |
           cmake --install build --config $env:BUILD_TYPE --prefix build/install-check
           $required = @(
-            "build/install-check/bin/preprocessor_app.exe",
-            "build/install-check/bin/onnxruntime.dll",
+            "${{ matrix.app_path }}",
+            "${{ matrix.ort_install_path }}",
             "build/install-check/lib/cmake/LLMPreprocessor/LLMPreprocessorConfig.cmake",
             "build/install-check/lib/cmake/LLMPreprocessor/LLMPreprocessorConfigVersion.cmake"
           )
@@ -62,12 +129,12 @@ jobs:
 
       - name: Unit tests
         shell: pwsh
-        run: ctest --test-dir build -C $env:BUILD_TYPE --output-on-failure
+        run: ctest --test-dir build ${{ matrix.ctest_config_args }} --output-on-failure
 
       - name: Smoke runner
         shell: pwsh
-        run: .\build\$env:BUILD_TYPE\smoke_runner.exe
+        run: "& '${{ matrix.smoke_path }}'"
 
       - name: Effectiveness runner
         shell: pwsh
-        run: .\build\$env:BUILD_TYPE\effectiveness_runner.exe
+        run: "& '${{ matrix.effectiveness_path }}'"
