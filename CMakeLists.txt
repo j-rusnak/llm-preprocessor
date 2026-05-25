@@ -29,6 +29,35 @@ else()
     set(ORT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-linux-x64-1.23.2")
 endif()
 
+set(LLM_PREPROCESSOR_ORT_RUNTIME_FILES)
+set(LLM_PREPROCESSOR_ORT_IMPORT_LIBS)
+if(WIN32)
+    list(APPEND LLM_PREPROCESSOR_ORT_RUNTIME_FILES
+        "${ORT_ROOT}/lib/onnxruntime.dll"
+    )
+    list(APPEND LLM_PREPROCESSOR_ORT_IMPORT_LIBS
+        "${ORT_ROOT}/lib/onnxruntime.lib"
+    )
+    if(EXISTS "${ORT_ROOT}/lib/onnxruntime_providers_shared.dll")
+        list(APPEND LLM_PREPROCESSOR_ORT_RUNTIME_FILES
+            "${ORT_ROOT}/lib/onnxruntime_providers_shared.dll"
+        )
+    endif()
+    if(EXISTS "${ORT_ROOT}/lib/onnxruntime_providers_shared.lib")
+        list(APPEND LLM_PREPROCESSOR_ORT_IMPORT_LIBS
+            "${ORT_ROOT}/lib/onnxruntime_providers_shared.lib"
+        )
+    endif()
+elseif(APPLE)
+    list(APPEND LLM_PREPROCESSOR_ORT_RUNTIME_FILES
+        "${ORT_ROOT}/lib/libonnxruntime.dylib"
+    )
+else()
+    list(APPEND LLM_PREPROCESSOR_ORT_RUNTIME_FILES
+        "${ORT_ROOT}/lib/libonnxruntime.so"
+    )
+endif()
+
 add_library(onnxruntime SHARED IMPORTED)
 if(WIN32)
     set_target_properties(onnxruntime PROPERTIES
@@ -211,6 +240,7 @@ target_link_libraries(effectiveness_runner PRIVATE preprocessor_lib)
 
 # --- 6. Install targets ---
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 install(TARGETS preprocessor_lib
     EXPORT LLMPreprocessorTargets
@@ -225,19 +255,58 @@ install(TARGETS preprocessor_app
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
+if(EXISTS "${ORT_ROOT}/include")
+    install(DIRECTORY "${ORT_ROOT}/include/"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/onnxruntime
+    )
+endif()
+
+if(WIN32)
+    foreach(_ort_runtime ${LLM_PREPROCESSOR_ORT_RUNTIME_FILES})
+        install(FILES "${_ort_runtime}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endforeach()
+    foreach(_ort_import_lib ${LLM_PREPROCESSOR_ORT_IMPORT_LIBS})
+        install(FILES "${_ort_import_lib}" DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    endforeach()
+else()
+    foreach(_ort_runtime ${LLM_PREPROCESSOR_ORT_RUNTIME_FILES})
+        install(FILES "${_ort_runtime}" DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    endforeach()
+endif()
+
 install(EXPORT LLMPreprocessorTargets
     FILE LLMPreprocessorTargets.cmake
     NAMESPACE LLMPreprocessor::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LLMPreprocessor
 )
 
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LLMPreprocessorConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/LLMPreprocessorConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LLMPreprocessor
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/LLMPreprocessorConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/LLMPreprocessorConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/LLMPreprocessorConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LLMPreprocessor
+)
+
 # --- 7. Copy ONNX Runtime DLL next to executables on Windows ---
 if(WIN32)
     foreach(_tgt preprocessor_app preprocessor_tests benchmark_runner effectiveness_runner)
-        add_custom_command(TARGET ${_tgt} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${ORT_ROOT}/lib/onnxruntime.dll"
-                $<TARGET_FILE_DIR:${_tgt}>)
+        foreach(_ort_runtime ${LLM_PREPROCESSOR_ORT_RUNTIME_FILES})
+            add_custom_command(TARGET ${_tgt} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_ort_runtime}"
+                    $<TARGET_FILE_DIR:${_tgt}>)
+        endforeach()
     endforeach()
 endif()
 

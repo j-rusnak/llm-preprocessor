@@ -20,6 +20,7 @@ From a Visual Studio Developer PowerShell at the repo root:
 ```powershell
 cmake -B build
 cmake --build build
+cmake --install build --prefix build\install
 ctest --test-dir build --output-on-failure
 .\build\smoke_runner.exe
 .\build\effectiveness_runner.exe > benchmarks\results\effectiveness.json
@@ -29,6 +30,7 @@ Expected:
 
 | Surface | Pass criterion |
 |---|---|
+| `cmake --install` | Installs `LLMPreprocessorConfig.cmake` and ONNX Runtime files under `build\install` |
 | `ctest` | `100% tests passed, 0 tests failed` |
 | `smoke_runner.exe` | `Summary: 54 passed, 0 failed.` |
 | `effectiveness_runner.exe` | Exit 0, summary table on stderr, JSON on stdout |
@@ -72,6 +74,18 @@ If you see this, you skipped one of the steps above. PowerShell cmdlets like
 Option C there.
 
 ---
+
+### 2.1 Install/package smoke check
+
+```powershell
+cmake --install build --prefix build\install
+Get-ChildItem build\install\lib\cmake\LLMPreprocessor
+Get-ChildItem build\install\bin\onnxruntime*.dll
+```
+
+Expected files include `LLMPreprocessorTargets.cmake`,
+`LLMPreprocessorConfig.cmake`, `LLMPreprocessorConfigVersion.cmake`,
+`onnxruntime.dll`, and `onnxruntime_providers_shared.dll` on Windows.
 
 ## 3. The four test surfaces
 
@@ -137,7 +151,7 @@ See section 4.
 | `EmbeddingCache` | round-trip latency, cold-vs-warm speedup |
 | `DiffPatcher` | bytes saved vs full-file transport, apply success |
 | `BM25Index` | top-1 / top-3 accuracy across hand-built queries, microseconds per query |
-| `GraphAwareRetriever` | top-3 lift from graph expansion, unrelated-definition pollution guard |
+| `GraphAwareRetriever` | top-3 lift from graph expansion, unrelated-definition pollution guard, multi-language fixture top-3 checks |
 | `ModelRouter` | routing accuracy on bucket+char-length test cases, microseconds per route |
 | `AbHarness` | sticky-assignment determinism (100/100), weighted balance (chi-squared) |
 | `AuthMiddleware` | HMAC verifies/second, microseconds per op |
@@ -161,6 +175,7 @@ Stderr prints a human-readable summary table:
 [DiffPatcher]          5988 B full vs 176 B diff (97.1% saved) | applied=yes
 [BM25Index]            17 docs / 8 queries | top-1 100.0% | top-3 100.0% | 37.69 us/query
 [GraphRetrieval]       seeds 2 -> 3 chunks | top-3 lift=yes | unrelated pollution=no
+[FixtureRetrieval]     4 files / 4 queries | top-3 100.0% | 125.00 us/query
 [ModelRouter]          4/4 correct (100.0%) | 0.57 us/route
 [AbHarness]            10000 assigns | A=2496 B=2502 C=5002 | chi^2=0.01 (crit 9.21) | sticky=100/100
 [AuthMiddleware]       50000 HMAC verifies | 11.14 us/op | 89802/s
@@ -181,6 +196,8 @@ Stderr prints a human-readable summary table:
   "bm25":                { "docs": 17, "queries": 8, "top1": 1.0, "top3": 1.0, "us_per_query": 37.7 },
   "graph_retrieval":     { "seed_count": 2, "expanded_count": 3,
                            "top3_lift": true, "unrelated_pollution": false },
+  "fixture_retrieval":   { "files": 4, "queries": 4, "top3_pct": 100.0,
+                           "by_language": {"cpp": {"top3_hit": true}} },
   "model_router":        { "cases": 4, "correct": 4, "accuracy": 1.0, "us_per_route": 0.57 },
   "ab_harness":          { "assigns": 10000, "counts": {"A":2496,"B":2502,"C":5002},
                            "chi_squared": 0.01, "sticky_ok": 100 },
@@ -203,6 +220,7 @@ The `Effectiveness_*` gtest cases lock in conservative floors:
 | `Effectiveness_EmbeddingCache.RoundTripsVectorsByModelId` | per-model isolation |
 | `Effectiveness_DiffPatcher.DiffIsSmallerThanFullFile` | diff < full content |
 | `Effectiveness_BM25.RetrievesCorrectDocInTop3` | top-1 correct on 2 queries |
+| `Effectiveness_Retrieval.FixtureQueriesHitExpectedLanguageFileTop3` | C++, TypeScript, Python, and Markdown fixture queries hit expected file in top-3 |
 | `Effectiveness_Retrieval.GraphExpansionImprovesTop3` | graph expansion adds expected definition to top-3 |
 | `Effectiveness_Retrieval.GraphExpansionDoesNotPolluteUnrelatedTopK` | unrelated definitions are absent and seed order is preserved |
 | `Effectiveness_ModelRouter.PicksCheapForSmallEdits` | bucket + char-length routing |
@@ -446,11 +464,16 @@ When enabled, queries like *"where is `Foo` defined"* or *"what calls
 
 ## 6. Production deployment recipes
 
+Start from [`../config.example.json`](../config.example.json) for a
+loopback-only, auth-enabled local proxy configuration. Replace the placeholder
+local proxy token and upstream key before serving.
+
 ### 6.1 Auth + rate-limited proxy
 
 `AuthMiddleware` and `RateLimiter` are wired into `ConfigLoader` and
 `OpenAIProxy` for `/v1/chat/completions` and `/stats`. `/healthz` remains a
-public liveness check. Non-loopback serving requires proxy auth unless
+public liveness check. Non-loopback serving requires proxy auth, rejects the
+example placeholder token, and requires a positive request-size limit unless
 `allow_unsafe_remote_proxy` is explicitly set.
 
 ```json
@@ -460,6 +483,10 @@ public liveness check. Non-loopback serving requires proxy auth unless
   "proxy_rate_limit_tokens_per_second": 2.0,
   "proxy_rate_limit_burst": 10.0,
   "proxy_max_request_bytes": 8388608,
+  "upstream_timeout_seconds": 60,
+  "upstream_connect_timeout_seconds": 10,
+  "upstream_max_response_bytes": 8388608,
+  "stream_idle_timeout_seconds": 30,
   "tokenizer_mode": "model-calibrated",
   "proxy_forward_client_authorization": false,
   "upstream_api_key": "provider-key"

@@ -45,6 +45,16 @@ struct OpenAIProxyConfig {
     /// libcurl upstream timeout (seconds).
     long upstream_timeout_seconds = 60;
 
+    /// libcurl upstream connection timeout (seconds).
+    long upstream_connect_timeout_seconds = 10;
+
+    /// Maximum buffered upstream response body size for non-streaming
+    /// completions. Set to 0 to disable the guard.
+    std::size_t upstream_max_response_bytes = 0;
+
+    /// Streaming idle timeout in seconds. Set to 0 to disable.
+    long stream_idle_timeout_seconds = 0;
+
     /// Local proxy authentication. Disabled when no bearer tokens or HMAC
     /// secret are configured.
     AuthMiddleware::Config auth;

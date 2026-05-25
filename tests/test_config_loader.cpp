@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "config_loader.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <cstdio>
 #include <string>
@@ -13,6 +14,14 @@ protected:
     void write_config(const std::string& content) {
         std::ofstream f(temp_path_);
         f << content;
+    }
+
+    std::string repo_file(const std::string& relative_path) const {
+        namespace fs = std::filesystem;
+        if (fs::exists(relative_path)) return relative_path;
+        auto from_build_dir = fs::path("..") / relative_path;
+        if (fs::exists(from_build_dir)) return from_build_dir.string();
+        return relative_path;
     }
 
     void TearDown() override {
@@ -177,6 +186,10 @@ TEST_F(ConfigLoaderTest, LoadsProxySecuritySettings) {
         "proxy_rate_limit_tokens_per_second": 12.5,
         "proxy_rate_limit_burst": 30,
         "proxy_max_request_bytes": 1048576,
+        "upstream_timeout_seconds": 45,
+        "upstream_connect_timeout_seconds": 4,
+        "upstream_max_response_bytes": 2097152,
+        "stream_idle_timeout_seconds": 20,
         "sync_cache_export_limit": 25,
         "sync_vector_export_limit": 50,
         "tokenizer_mode": "model-calibrated",
@@ -193,6 +206,10 @@ TEST_F(ConfigLoaderTest, LoadsProxySecuritySettings) {
     EXPECT_DOUBLE_EQ(config.proxy_rate_limit_tokens_per_second, 12.5);
     EXPECT_DOUBLE_EQ(config.proxy_rate_limit_burst, 30.0);
     EXPECT_EQ(config.proxy_max_request_bytes, 1048576u);
+    EXPECT_EQ(config.upstream_timeout_seconds, 45);
+    EXPECT_EQ(config.upstream_connect_timeout_seconds, 4);
+    EXPECT_EQ(config.upstream_max_response_bytes, 2097152u);
+    EXPECT_EQ(config.stream_idle_timeout_seconds, 20);
     EXPECT_EQ(config.sync_cache_export_limit, 25u);
     EXPECT_EQ(config.sync_vector_export_limit, 50u);
     EXPECT_EQ(config.tokenizer_mode, "model-calibrated");
@@ -200,8 +217,72 @@ TEST_F(ConfigLoaderTest, LoadsProxySecuritySettings) {
     EXPECT_FALSE(config.allow_unsafe_remote_proxy);
 }
 
+TEST_F(ConfigLoaderTest, LoadsProductionExampleConfig) {
+    const auto path = repo_file("config.example.json");
+    ASSERT_TRUE(std::filesystem::exists(path)) << path;
+
+    auto config = preprocessor::ConfigLoader::load(path);
+
+    EXPECT_EQ(config.proxy_host, "127.0.0.1");
+    EXPECT_FALSE(config.allow_unsafe_remote_proxy);
+    ASSERT_EQ(config.proxy_auth_bearer_tokens.size(), 1u);
+    EXPECT_EQ(config.proxy_auth_bearer_tokens[0],
+              "replace-with-local-proxy-token");
+    EXPECT_FALSE(config.proxy_forward_client_authorization);
+    EXPECT_DOUBLE_EQ(config.proxy_rate_limit_tokens_per_second, 5.0);
+    EXPECT_DOUBLE_EQ(config.proxy_rate_limit_burst, 20.0);
+    EXPECT_EQ(config.proxy_max_request_bytes, 1048576u);
+    EXPECT_EQ(config.upstream_timeout_seconds, 60);
+    EXPECT_EQ(config.upstream_connect_timeout_seconds, 10);
+    EXPECT_EQ(config.upstream_max_response_bytes, 8388608u);
+    EXPECT_EQ(config.stream_idle_timeout_seconds, 30);
+    EXPECT_EQ(config.sync_cache_export_limit, 100u);
+    EXPECT_EQ(config.sync_vector_export_limit, 100u);
+    EXPECT_EQ(config.tokenizer_mode, "model-calibrated");
+    EXPECT_TRUE(config.prompt_optimizer_enabled);
+    EXPECT_TRUE(config.symbol_graph_enabled);
+    EXPECT_TRUE(config.graph_expansion_enabled);
+    EXPECT_TRUE(config.structural_fast_path_enabled);
+    EXPECT_TRUE(config.prompt_rewriter_enabled);
+    EXPECT_EQ(config.prompt_rewriter_kind, "heuristic");
+    EXPECT_EQ(config.prompt_rewriter_max_chars, 8000u);
+}
+
 TEST_F(ConfigLoaderTest, RejectsNonLoopbackProxyWithoutAuthByDefault) {
     write_config(R"({"proxy_host": "0.0.0.0"})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsEmptyUpstreamUrl) {
+    write_config(R"({"upstream_url": ""})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsInvalidUpstreamTimeouts) {
+    write_config(R"({"upstream_timeout_seconds": 0})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+
+    write_config(R"({"upstream_connect_timeout_seconds": 0})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+
+    write_config(R"({"stream_idle_timeout_seconds": -1})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsNonLoopbackProxyWithPlaceholderBearer) {
+    write_config(R"({
+        "proxy_host": "0.0.0.0",
+        "proxy_auth_bearer_tokens": ["replace-with-local-proxy-token"]
+    })");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsNonLoopbackProxyWithoutRequestSizeLimit) {
+    write_config(R"({
+        "proxy_host": "0.0.0.0",
+        "proxy_auth_bearer_tokens": ["local-token"],
+        "proxy_max_request_bytes": 0
+    })");
     EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
 }
 

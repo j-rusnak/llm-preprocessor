@@ -53,6 +53,10 @@ struct FakeUpstream {
     std::string last_body;
     std::string last_authorization;
     bool streaming_response = false;
+    int streaming_chunk_count = 2;
+    int streaming_chunk_delay_ms = 0;
+    std::atomic<int> streaming_chunks_written{0};
+    std::atomic<int> streaming_write_failures{0};
     int response_status = 200;
     std::string response_body;
     std::string response_content_type = "application/json";
@@ -69,14 +73,22 @@ struct FakeUpstream {
             if (streaming_response) {
                 res.set_chunked_content_provider(
                     "text/event-stream",
-                    [](std::size_t, httplib::DataSink& sink) {
-                        const std::string first =
-                            "data: {\"choices\":[{\"delta\":{\"content\":\"he\"}}]}\n\n";
-                        const std::string second =
-                            "data: {\"choices\":[{\"delta\":{\"content\":\"llo\"}}]}\n\n";
+                    [this](std::size_t, httplib::DataSink& sink) {
                         const std::string done = "data: [DONE]\n\n";
-                        if (!sink.write(first.data(), first.size())) return false;
-                        if (!sink.write(second.data(), second.size())) return false;
+                        for (int i = 0; i < streaming_chunk_count; ++i) {
+                            const std::string chunk =
+                                "data: {\"choices\":[{\"delta\":{\"content\":\"" +
+                                std::to_string(i) + "\"}}]}\n\n";
+                            if (!sink.write(chunk.data(), chunk.size())) {
+                                streaming_write_failures.fetch_add(1);
+                                return false;
+                            }
+                            streaming_chunks_written.fetch_add(1);
+                            if (streaming_chunk_delay_ms > 0) {
+                                std::this_thread::sleep_for(
+                                    std::chrono::milliseconds(streaming_chunk_delay_ms));
+                            }
+                        }
                         if (!sink.write(done.data(), done.size())) return false;
                         sink.done();
                         return true;
@@ -251,6 +263,9 @@ TEST(OpenAIProxy, AuthRejectsMissingBearerBeforeUpstream) {
     ASSERT_TRUE(r);
     EXPECT_EQ(r->status, 401);
     EXPECT_EQ(up.calls.load(), 0);
+
+    const auto metrics = h.metrics.snapshot();
+    EXPECT_EQ(metrics["auth_failures_total"], 1u);
 }
 
 TEST(OpenAIProxy, AuthAllowsBearerAndDoesNotLeakLocalTokenWhenDisabledForwarding) {
@@ -298,6 +313,9 @@ TEST(OpenAIProxy, RateLimitRejectsBeforeCacheOrUpstream) {
     ASSERT_TRUE(r2);
     EXPECT_EQ(r2->status, 429);
     EXPECT_EQ(up.calls.load(), 1);
+
+    const auto metrics = h.metrics.snapshot();
+    EXPECT_EQ(metrics["rate_limit_denials_total"], 1u);
 }
 
 TEST(OpenAIProxy, RequestBodyTooLargeReturns413BeforeUpstream) {
@@ -315,6 +333,39 @@ TEST(OpenAIProxy, RequestBodyTooLargeReturns413BeforeUpstream) {
     ASSERT_TRUE(r);
     EXPECT_EQ(r->status, 413);
     EXPECT_EQ(up.calls.load(), 0);
+
+    const auto metrics = h.metrics.snapshot();
+    EXPECT_EQ(metrics["request_too_large_denials_total"], 1u);
+}
+
+TEST(OpenAIProxy, UpstreamResponseTooLargeReturns502AndDoesNotCache) {
+    ProxyHarness h;
+    FakeUpstream up;
+    up.response_body = R"({"choices":[{"message":{"content":"larger than limit"}}]})";
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.upstream_max_response_bytes = 16;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"messages", json::array({{{"role", "user"}, {"content", "hello"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r1 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    ASSERT_TRUE(r1);
+    EXPECT_EQ(r1->status, 502);
+    EXPECT_NE(r1->body.find("upstream response exceeds upstream_max_response_bytes"),
+              std::string::npos);
+
+    auto r2 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    ASSERT_TRUE(r2);
+    EXPECT_EQ(r2->status, 502);
+    EXPECT_EQ(up.calls.load(), 2);
+
+    const auto metrics = h.metrics.snapshot();
+    EXPECT_EQ(metrics["upstream_errors_total"], 2u);
 }
 
 TEST(OpenAIProxy, StreamingForwardsSseWithEventStreamContentType) {
@@ -409,6 +460,52 @@ TEST(OpenAIProxy, StreamingTransportFailureEmitsErrorAndDone) {
     EXPECT_EQ(r->get_header_value("Content-Type"), "text/event-stream");
     EXPECT_NE(r->body.find("event: error"), std::string::npos);
     EXPECT_NE(r->body.find("data: [DONE]"), std::string::npos);
+
+    const auto metrics = h.metrics.snapshot();
+    EXPECT_EQ(metrics["upstream_errors_total"], 1u);
+}
+
+TEST(OpenAIProxy, StreamingClientDisconnectCancelsWithoutSseErrorTrailer) {
+    ProxyHarness h;
+    FakeUpstream up;
+    up.streaming_response = true;
+    up.streaming_chunk_count = 64;
+    up.streaming_chunk_delay_ms = 2;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions");
+
+    json body = {
+        {"model", "gpt-test"},
+        {"stream", true},
+        {"messages", json::array({{{"role", "user"}, {"content", "say hello"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    std::string received;
+    std::atomic<int> callbacks{0};
+    auto r = cli.Post(
+        "/v1/chat/completions", httplib::Headers{}, body.dump(), "application/json",
+        [&](const char* data, std::size_t len) {
+            received.append(data, len);
+            callbacks.fetch_add(1);
+            return false;
+        });
+
+    (void)r;
+    EXPECT_GE(callbacks.load(), 1);
+    EXPECT_NE(received.find("data: {\"choices\""), std::string::npos);
+    EXPECT_EQ(received.find("event: error"), std::string::npos);
+
+    std::uint64_t cancellations = 0;
+    for (int i = 0; i < 50; ++i) {
+        auto stats = cli.Get("/stats");
+        if (stats && stats->status == 200) {
+            const auto metrics = json::parse(stats->body);
+            cancellations = metrics.value("stream_cancellations_total", 0u);
+            if (cancellations > 0) break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(cancellations, 1u);
 }
 
 TEST(OpenAIProxy, ModelRouterSelectsTierAndRewritesForwardedRequest) {

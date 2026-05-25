@@ -37,7 +37,8 @@ proxy now sits between your IDE/agent and the upstream LLM:
 - `PromptCache` - SQLite-backed cache keyed by
   `xxhash64(model || compiled_upstream_request || sorted(chunk_ids))` with optional TTL.
 - `ProxyMetrics` - lock-free atomic counters for requests, cache hits,
-  upstream calls, errors, and **tokens saved** (compiled vs original).
+  upstream calls, denials, upstream errors, stream cancellations, and
+  **tokens saved** (compiled vs original).
 - `RepoIndex` - wires `BraceAwareChunker` + embedder + `VectorStore` +
   `BM25Index` + `HybridRetriever` and watches the repo via `FileWatcher`
   for incremental re-indexing.
@@ -203,7 +204,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **BM25Index** | `bm25_index.hpp` | Okapi BM25 ranker with identifier-aware tokenisation. |
 | **HybridRetriever** | `hybrid_retriever.hpp` | RRF fusion of `VectorStore` + `BM25Index` hits. |
 | **PromptCache** | `prompt_cache.hpp` | SQLite-backed cache of upstream responses, keyed by `(model, compiled request, chunk_ids)`. |
-| **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, tokens saved, and per-model-family token totals. |
+| **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, stream cancellations, tokens saved, and per-model-family token totals. |
 | **RepoIndex** | `repo_index.hpp` | End-to-end chunk + embed + index over a repo, kept fresh by `FileWatcher`. |
 | **OpenAIProxy** | `openai_proxy.hpp` | cpp-httplib server, OpenAI-compatible chat completions with RAG context injection. |
 | **ProjectCard** | `project_card.hpp` | Repository summary (extensions, top symbols, README excerpt) derived from `RepoIndex`. |
@@ -314,6 +315,13 @@ This creates `models/model.onnx` (~80 MB) and `models/vocab.txt` (~232 KB).
 
 > **Tip:** Add `models/` to your `.gitignore` — don't commit large binary files.
 
+Runtime assets such as `models/`, `onnxruntime-*/`, `*.zip`, and local SQLite
+databases are ignored by git. Keep them local or provide them through your
+release process instead of committing generated binaries.
+
+For proxy deployments, start from [`config.example.json`](config.example.json)
+and replace the local proxy token and upstream key placeholders before serving.
+
 ## Build
 
 Building requires a **Visual Studio Developer Command Prompt** (or equivalent) so the MSVC environment variables are set.
@@ -322,9 +330,27 @@ Building requires a **Visual Studio Developer Command Prompt** (or equivalent) s
 # Open a VS Developer PowerShell, then:
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_TOOLCHAIN_FILE=<path-to-vcpkg>/scripts/buildsystems/vcpkg.cmake
 cmake --build build
+```
 
-# Copy the ONNX Runtime DLL next to the built executables
-copy onnxruntime-win-x64-1.23.2\lib\onnxruntime.dll build\
+The build copies the ONNX Runtime runtime DLLs next to the generated
+executables on Windows.
+
+## Install / Package Smoke Check
+
+The CMake install target installs the app, library, headers, CMake package
+files, and ONNX Runtime redistributables into the chosen prefix:
+
+```powershell
+cmake --install build --prefix build\install
+Get-ChildItem build\install\lib\cmake\LLMPreprocessor
+Get-ChildItem build\install\bin\onnxruntime*.dll
+```
+
+Consumers can use the installed package with:
+
+```cmake
+find_package(LLMPreprocessor CONFIG REQUIRED)
+target_link_libraries(my_tool PRIVATE LLMPreprocessor::preprocessor_lib)
 ```
 
 ## Testing
@@ -453,8 +479,9 @@ Endpoints:
   not cached.
 - `GET /healthz` - liveness check.
 - `GET /stats` - JSON snapshot of `ProxyMetrics` (tokens saved, cache hits,
-  upstream calls, errors, and per-model-family token totals). Protected by
-  proxy auth when auth is configured.
+  upstream calls, auth/rate/request-size denials, upstream errors, stream
+  cancellations, and per-model-family token totals). Protected by proxy auth
+  when auth is configured.
 - `GET /sync/cache` - export a `SyncBundle` containing recent cache entries.
   Protected by proxy auth when auth is configured.
 - `POST /sync/cache` - import cache entries from a peer `SyncBundle`.
@@ -477,6 +504,10 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `max_context_chars` | Cap on injected context | `8000` |
 | `upstream_url` | OpenAI-compatible URL to forward to | `https://api.openai.com/v1/chat/completions` |
 | `upstream_api_key` | Fallback bearer token if the client did not send one | — |
+| `upstream_timeout_seconds` | Overall upstream libcurl timeout | `60` |
+| `upstream_connect_timeout_seconds` | Upstream connection timeout | `10` |
+| `upstream_max_response_bytes` | Max buffered non-streaming upstream response size (`0` = disabled) | `0` |
+| `stream_idle_timeout_seconds` | Streaming idle timeout (`0` = disabled) | `0` |
 | `tokenizer_mode` | Token estimator for budgets and telemetry: `"heuristic"` or `"model-calibrated"` | `"heuristic"` |
 | `model_tiers` | Optional array of `{name, upstream_url, model_name, api_key, max_context}` tier definitions | `[]` |
 | `model_routes` | Optional ordered array of `{bucket, min_request_chars, max_request_chars, tier}` routing rules | `[]` |
@@ -502,12 +533,21 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `llama_model_path` | Path to a `.gguf` model when `prompt_rewriter_kind == "llama-cpp"` | — |
 
 By default, `proxy_host` is loopback-only. Binding to `0.0.0.0`, a LAN IP, or
-another non-loopback address requires either local proxy auth
-(`proxy_auth_bearer_tokens` or `proxy_auth_hmac_secret`) or the explicit
-`allow_unsafe_remote_proxy=true` override. Local bearer auth accepts
-`X-Preprocessor-Authorization: Bearer <token>` or `Authorization: Bearer
-<token>`. Prefer the `X-Preprocessor-*` headers when the client also needs to
-send an upstream provider key in `Authorization`.
+another non-loopback address requires local proxy auth
+(`proxy_auth_bearer_tokens` or `proxy_auth_hmac_secret`) unless the explicit
+`allow_unsafe_remote_proxy=true` override is set. Non-loopback configs also
+reject the example placeholder token and require a positive
+`proxy_max_request_bytes` unless the unsafe override is set. Local bearer auth
+accepts `X-Preprocessor-Authorization: Bearer <token>` or
+`Authorization: Bearer <token>`. Prefer the `X-Preprocessor-*` headers when the
+client also needs to send an upstream provider key in `Authorization`.
+
+[`config.example.json`](config.example.json) shows a production-oriented local
+proxy starter config with loopback binding, local bearer auth, rate limiting,
+request-size limits, model-calibrated metrics, symbol graph retrieval, and the
+heuristic prompt rewriter enabled. Do not expose a non-loopback proxy without
+real local proxy auth unless you intentionally set
+`allow_unsafe_remote_proxy=true`.
 
 Multi-tier routing is ordered, first-match wins. Buckets are `code_edit`,
 `code_explain`, `code_generate`, `meta_query`, and `freeform`; request-size
@@ -781,7 +821,7 @@ cd build
 | **ChatHistoryStoreTest** | 10 | SQLite CRUD, ordering, history limits, move semantics, update, clear, prune |
 | **PromptCompilerTest** | 7 | JSON payload construction, `build_payload_json`, API params |
 | **UrlExtractionTest** | 6 | URL detection in text (http/https, mixed content) |
-| **ConfigLoaderTest** | 18 | Config validation, defaults, multi-example parsing, backward compat, bounds checking |
+| **ConfigLoaderTest** | 29 | Config validation, defaults, multi-example parsing, proxy safety, packaging example, model routing |
 | **TokenizerTest** | 12 | WordPiece encoding, special tokens, truncation, subwords |
 | **EmbeddingEngineTest** | 13 | Shape, normalization, similarity, multi-example routing, sliding-window, stop-words |
 
@@ -805,13 +845,13 @@ cmake -B build -G Ninja `
 # 2. Build everything (app + tests + benchmark)
 cmake --build build
 
-# 3. Copy ONNX Runtime DLL (Windows only)
-Copy-Item onnxruntime-win-x64-1.23.2\lib\onnxruntime.dll build\
-
-# 4. Run the test suite
+# 3. Run the test suite
 cd build
 ctest --output-on-failure
 cd ..
+
+# 4. Run an install/package smoke check
+cmake --install build --prefix build\install
 
 # 5. Run the benchmark
 New-Item -ItemType Directory -Path benchmarks\results -Force | Out-Null

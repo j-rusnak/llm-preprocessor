@@ -9,6 +9,11 @@ TEST(ProxyMetrics, CountersStartAtZero) {
     ProxyMetrics m;
     auto j = m.snapshot();
     EXPECT_EQ(j["requests_total"], 0u);
+    EXPECT_EQ(j["auth_failures_total"], 0u);
+    EXPECT_EQ(j["rate_limit_denials_total"], 0u);
+    EXPECT_EQ(j["request_too_large_denials_total"], 0u);
+    EXPECT_EQ(j["upstream_errors_total"], 0u);
+    EXPECT_EQ(j["stream_cancellations_total"], 0u);
     EXPECT_EQ(j["tokens_saved"], 0u);
 }
 
@@ -19,11 +24,21 @@ TEST(ProxyMetrics, IncrementsAccumulate) {
     m.on_cache_hit();
     m.on_upstream_call();
     m.on_error();
+    m.on_auth_failure();
+    m.on_rate_limit_denial();
+    m.on_request_too_large_denial();
+    m.on_upstream_error();
+    m.on_stream_cancellation();
     auto j = m.snapshot();
     EXPECT_EQ(j["requests_total"], 2u);
     EXPECT_EQ(j["cache_hits"], 1u);
     EXPECT_EQ(j["upstream_calls"], 1u);
     EXPECT_EQ(j["errors_total"], 1u);
+    EXPECT_EQ(j["auth_failures_total"], 1u);
+    EXPECT_EQ(j["rate_limit_denials_total"], 1u);
+    EXPECT_EQ(j["request_too_large_denials_total"], 1u);
+    EXPECT_EQ(j["upstream_errors_total"], 1u);
+    EXPECT_EQ(j["stream_cancellations_total"], 1u);
 }
 
 TEST(ProxyMetrics, TokensSavedClampedToZero) {

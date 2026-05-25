@@ -1,0 +1,48 @@
+{
+  "model_path": "models/model.ort",
+  "vocab_path": "models/vocab.txt",
+  "db_path": "history.db",
+  "system_prompt": "You are a helpful AI coding assistant. Answer concisely and ground changes in the repository context.",
+  "similarity_threshold": 0.65,
+  "history_limit": 10,
+
+  "proxy_host": "127.0.0.1",
+  "proxy_port": 8088,
+  "repo_root": ".",
+  "cache_db_path": "prompt_cache.db",
+  "retrieval_k": 6,
+  "embedding_dim": 384,
+  "max_context_chars": 12000,
+  "upstream_url": "https://api.openai.com/v1/chat/completions",
+  "upstream_api_key": "",
+  "upstream_timeout_seconds": 60,
+  "upstream_connect_timeout_seconds": 10,
+  "upstream_max_response_bytes": 8388608,
+  "stream_idle_timeout_seconds": 30,
+
+  "proxy_auth_bearer_tokens": ["replace-with-local-proxy-token"],
+  "proxy_auth_hmac_secret": "",
+  "proxy_auth_max_clock_skew_seconds": 300,
+  "proxy_rate_limit_tokens_per_second": 5.0,
+  "proxy_rate_limit_burst": 20.0,
+  "proxy_max_request_bytes": 1048576,
+  "sync_cache_export_limit": 100,
+  "sync_vector_export_limit": 100,
+  "tokenizer_mode": "model-calibrated",
+  "proxy_forward_client_authorization": false,
+  "allow_unsafe_remote_proxy": false,
+
+  "prompt_optimizer_enabled": true,
+  "prompt_templates_path": "",
+  "include_project_card": true,
+  "symbol_graph_enabled": true,
+  "graph_expansion_enabled": true,
+  "structural_fast_path_enabled": true,
+
+  "prompt_rewriter_enabled": true,
+  "prompt_rewriter_kind": "heuristic",
+  "prompt_rewriter_max_chars": 8000,
+  "llama_model_path": "",
+
+  "intents": []
+}

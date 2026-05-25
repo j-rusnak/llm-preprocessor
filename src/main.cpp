@@ -104,6 +104,11 @@ static int run_serve(const preprocessor::Config& config) {
     pcfg.upstream_api_key = config.upstream_api_key;
     pcfg.retrieval_k = config.retrieval_k;
     pcfg.max_context_chars = config.max_context_chars;
+    pcfg.upstream_timeout_seconds = config.upstream_timeout_seconds;
+    pcfg.upstream_connect_timeout_seconds =
+        config.upstream_connect_timeout_seconds;
+    pcfg.upstream_max_response_bytes = config.upstream_max_response_bytes;
+    pcfg.stream_idle_timeout_seconds = config.stream_idle_timeout_seconds;
     pcfg.auth.bearer_tokens.insert(config.proxy_auth_bearer_tokens.begin(),
                                    config.proxy_auth_bearer_tokens.end());
     pcfg.auth.hmac_secret = config.proxy_auth_hmac_secret;
