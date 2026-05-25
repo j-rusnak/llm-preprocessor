@@ -6,12 +6,16 @@
 #include "prompt_cache.hpp"
 #include "proxy_metrics.hpp"
 #include "repo_index.hpp"
+#include "structural_query_engine.hpp"
+#include "symbol_graph.hpp"
 #include "sync_endpoint.hpp"
 
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -438,4 +442,43 @@ TEST(OpenAIProxy, SyncCacheImportAndExportWithAuth) {
     ASSERT_EQ(roundtrip.cache.size(), 1u);
     EXPECT_EQ(roundtrip.cache[0].key, "team-key");
     EXPECT_EQ(roundtrip.cache[0].body, "team-payload");
+}
+
+TEST(OpenAIProxy, StructuralFastPathHonorsStreamingSse) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+    h.index.attach_symbol_graph(&graph, &extractor);
+
+    const auto dir = std::filesystem::temp_directory_path() /
+        ("llm_pp_proxy_struct_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "math.cpp")
+        << "int add(int a,int b){ return a+b; }\n";
+    h.index.index_path(dir.string());
+
+    preprocessor::StructuralQueryEngine structural(graph, h.index);
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions");
+    h.proxy->set_structural_query_engine(&structural);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"stream", true},
+        {"messages", json::array({{{"role", "user"}, {"content", "where is `add`?"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+    EXPECT_EQ(r->get_header_value("Content-Type"), "text/event-stream");
+    EXPECT_NE(r->body.find("data: {\"choices\""), std::string::npos);
+    EXPECT_NE(r->body.find("data: [DONE]"), std::string::npos);
+    EXPECT_EQ(up.calls.load(), 0);
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }

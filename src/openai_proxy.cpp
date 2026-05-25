@@ -154,6 +154,45 @@ void write_sse_error(httplib::DataSink& sink, const std::string& message) {
     sink.write(event.data(), event.size());
 }
 
+bool stream_synthetic_completion(const std::string& id,
+                                 long long created,
+                                 const std::string& model,
+                                 const std::string& content,
+                                 httplib::DataSink& sink) {
+    const json first = {
+        {"id", id},
+        {"object", "chat.completion.chunk"},
+        {"created", created},
+        {"model", model},
+        {"choices", json::array({
+            json{{"index", 0},
+                 {"delta", json{{"role", "assistant"}, {"content", content}}},
+                 {"finish_reason", nullptr}}
+        })},
+        {"x_preprocessor", json{{"source", "structural_query_engine"}}}
+    };
+    const json last = {
+        {"id", id},
+        {"object", "chat.completion.chunk"},
+        {"created", created},
+        {"model", model},
+        {"choices", json::array({
+            json{{"index", 0},
+                 {"delta", json::object()},
+                 {"finish_reason", "stop"}}
+        })},
+        {"x_preprocessor", json{{"source", "structural_query_engine"}}}
+    };
+    const std::string first_event = "data: " + first.dump() + "\n\n";
+    const std::string last_event = "data: " + last.dump() + "\n\n";
+    const std::string done = "data: [DONE]\n\n";
+    if (!sink.write(first_event.data(), first_event.size())) return false;
+    if (!sink.write(last_event.data(), last_event.size())) return false;
+    if (!sink.write(done.data(), done.size())) return false;
+    sink.done();
+    return true;
+}
+
 bool stream_upstream(const std::string& url,
                      const std::string& body,
                      const std::string& incoming_auth,
@@ -464,8 +503,23 @@ void OpenAIProxy::install_routes() {
                     metrics_.on_cache_hit(); // counts as an upstream-avoided hit
                     auto now = std::chrono::system_clock::now().time_since_epoch();
                     long long ts = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+                    const std::string id =
+                        std::string("local-structural-") + std::to_string(ts);
+                    if (stream) {
+                        const std::string answer_text = *answer;
+                        const std::string model = effective_model;
+                        res.set_header("Cache-Control", "no-cache");
+                        res.set_chunked_content_provider(
+                            "text/event-stream",
+                            [id, ts, model, answer_text]
+                            (std::size_t, httplib::DataSink& sink) {
+                                return stream_synthetic_completion(
+                                    id, ts, model, answer_text, sink);
+                            });
+                        return;
+                    }
                     json synthetic = {
-                        {"id", std::string("local-structural-") + std::to_string(ts)},
+                        {"id", id},
                         {"object", "chat.completion"},
                         {"created", ts},
                         {"model", effective_model},
