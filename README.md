@@ -26,6 +26,7 @@ The product surface is intentionally narrow:
 | Production controls | Bearer/HMAC auth, rate limiting, request-size limits, upstream timeouts, stream idle timeout, non-loopback safety checks. |
 | Team mode | `SyncEndpoint` exports/imports prompt-cache entries and vector bundles. |
 | Measurement | `smoke_runner`, `effectiveness_runner`, and `Effectiveness_*` tests cover end-to-end behaviour and quality floors. |
+| Visualization | `tools/perf_visualizer` serves a standalone local dashboard for effectiveness samples and live proxy `/stats`. |
 
 ## Architecture
 
@@ -247,6 +248,18 @@ The smoke runner exercises the local middleware pipeline without requiring the
 ONNX model. The effectiveness runner emits JSON to stdout and a summary table
 to stderr for cache speedup, context packing, compression, retrieval quality,
 model routing, auth throughput, and rate limiting.
+
+To visualize those gains over time, run the standalone dashboard:
+
+```powershell
+python tools\perf_visualizer\run_dashboard.py `
+  --effectiveness-exe build\effectiveness_runner.exe `
+  --run-effectiveness-on-start `
+  --open
+```
+
+See [tools/perf_visualizer/README.md](tools/perf_visualizer/README.md) for live
+proxy `/stats` polling and full-program test commands.
 
 See [docs/TESTING.md](docs/TESTING.md) for the full feature usage guide and
 [docs/RELEASE.md](docs/RELEASE.md) for the release checklist.
