@@ -8,10 +8,12 @@
 #include "vector_store.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 
@@ -31,6 +33,91 @@ std::string lower_ext(const fs::path& p) {
     std::string e = p.extension().string();
     for (auto& c : e) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return e;
+}
+
+std::string lower_ascii(std::string s) {
+    for (auto& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s;
+}
+
+std::string normalized_path_text(std::string path) {
+    std::replace(path.begin(), path.end(), '\\', '/');
+    return lower_ascii(std::move(path));
+}
+
+std::string language_hint_for_path(const fs::path& path) {
+    const std::string filename = lower_ascii(path.filename().string());
+    const std::string ext = lower_ext(path);
+    if (filename == "cmakelists.txt" || ext == ".cmake") return "cmake";
+    if (ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx" ||
+        ext == ".h" || ext == ".hh" || ext == ".hpp" || ext == ".hxx") {
+        return "cpp";
+    }
+    if (ext == ".ts" || ext == ".tsx") return "typescript";
+    if (ext == ".js" || ext == ".jsx") return "javascript";
+    if (ext == ".py") return "python";
+    if (ext == ".rs") return "rust";
+    if (ext == ".go") return "go";
+    if (ext == ".java") return "java";
+    if (ext == ".kt") return "kotlin";
+    if (ext == ".cs") return "csharp";
+    if (ext == ".md" || ext == ".mdx") return "markdown";
+    if (ext == ".json" || ext == ".jsonl") return "json";
+    if (ext == ".yaml" || ext == ".yml") return "yaml";
+    if (ext == ".toml") return "toml";
+    if (ext == ".sql") return "sql";
+    return {};
+}
+
+std::string bm25_document_for_chunk(const CodeChunk& chunk) {
+    std::ostringstream doc;
+    doc << chunk.text << '\n';
+
+    const fs::path path(chunk.file_path);
+    const std::string normalized_path = normalized_path_text(chunk.file_path);
+    const std::string filename = lower_ascii(path.filename().string());
+    const std::string stem = lower_ascii(path.stem().string());
+    const std::string ext = lower_ext(path);
+    const std::string language = language_hint_for_path(path);
+
+    doc << normalized_path << '\n';
+    doc << filename << ' ' << stem << ' ';
+    if (!ext.empty()) doc << ext.substr(1) << ' ';
+    if (!language.empty()) doc << language << ' ';
+    if (language == "cpp") doc << "cplusplus ";
+    if (language == "typescript") doc << "ts ";
+    if (language == "javascript") doc << "js ";
+    if (language == "python") doc << "py ";
+    if (language == "rust") doc << "rs ";
+    if (language == "yaml") doc << "yml ";
+    if (language == "json") doc << "jsonl ";
+    if (!chunk.symbol.empty()) doc << chunk.symbol << ' ';
+    return doc.str();
+}
+
+std::vector<RetrievedChunk> distinct_files_first(std::vector<RetrievedChunk> chunks,
+                                                 std::size_t k) {
+    if (chunks.size() <= k) return chunks;
+
+    std::vector<RetrievedChunk> out;
+    out.reserve(k);
+    std::vector<bool> selected(chunks.size(), false);
+    std::unordered_set<std::string> seen_files;
+    seen_files.reserve(k);
+
+    for (std::size_t i = 0; i < chunks.size() && out.size() < k; ++i) {
+        if (seen_files.insert(chunks[i].chunk.file_path).second) {
+            selected[i] = true;
+            out.push_back(chunks[i]);
+        }
+    }
+    for (std::size_t i = 0; i < chunks.size() && out.size() < k; ++i) {
+        if (selected[i]) continue;
+        out.push_back(chunks[i]);
+    }
+    return out;
 }
 
 } // namespace
@@ -164,7 +251,7 @@ void RepoIndex::index_file_locked(const std::string& file_path) {
             continue;
         }
         vectors_->add(id, embeds[i]);
-        keywords_->add(id, chunks[i].text);
+        keywords_->add(id, bm25_document_for_chunk(chunks[i]));
         if (symbol_graph_ && symbol_extractor_) {
             symbol_graph_->update_chunk(chunks[i],
                                         symbol_extractor_->extract(chunks[i]));
@@ -200,6 +287,8 @@ void RepoIndex::forget_file_locked(const std::string& file_path) {
             if (!refs_it->second.empty()) {
                 if (erased_representative) {
                     chunks_by_id_[id] = refs_it->second.begin()->second;
+                    keywords_->remove(id);
+                    keywords_->add(id, bm25_document_for_chunk(chunks_by_id_[id]));
                     if (symbol_graph_ && symbol_extractor_) {
                         symbol_graph_->update_chunk(chunks_by_id_[id],
                                                     symbol_extractor_->extract(chunks_by_id_[id]));
@@ -226,19 +315,20 @@ std::vector<RetrievedChunk> RepoIndex::search(const std::string& query, std::siz
     std::vector<HybridHit> hits;
     {
         std::lock_guard<std::mutex> lock(mu_);
-        hits = retriever_->search(query, q_emb, k);
+        const std::size_t candidate_k = std::max<std::size_t>(k, k * 4);
+        hits = retriever_->search(query, q_emb, candidate_k);
     }
-    std::vector<RetrievedChunk> out;
-    out.reserve(hits.size());
+    std::vector<RetrievedChunk> hydrated;
+    hydrated.reserve(hits.size());
     {
         std::lock_guard<std::mutex> lock(mu_);
         for (const auto& h : hits) {
             auto it = chunks_by_id_.find(h.id);
             if (it == chunks_by_id_.end()) continue;
-            out.push_back({it->second, h.score});
+            hydrated.push_back({it->second, h.score});
         }
     }
-    return out;
+    return distinct_files_first(std::move(hydrated), k);
 }
 
 std::size_t RepoIndex::chunk_count() const {
@@ -317,7 +407,7 @@ std::size_t RepoIndex::apply_synced_vectors(
         chunks_by_id_[chunk.id] = chunk;
 
         vectors_->add(chunk.id, v.vec);
-        keywords_->add(chunk.id, chunk.text);
+        keywords_->add(chunk.id, bm25_document_for_chunk(chunk));
         if (symbol_graph_ && symbol_extractor_) {
             symbol_graph_->update_chunk(chunk,
                                         symbol_extractor_->extract(chunk));

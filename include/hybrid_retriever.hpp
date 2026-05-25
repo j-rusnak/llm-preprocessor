@@ -20,10 +20,13 @@ struct HybridHit {
 /// Reciprocal-Rank-Fusion combiner for dense + sparse retrieval.
 ///
 /// For each ranking r in {vector_hits, bm25_hits} a document at position p
-/// (0-based) contributes `1 / (rrf_k + p)` to its total score. Final results
-/// are sorted by total score descending. RRF is parameter-light and
-/// scale-invariant, which makes it ideal when fusing two scorers (cosine
-/// similarity, BM25) whose raw scores live on incompatible scales.
+/// (0-based) contributes `weight / (rrf_k + p)` to its total score. Exact
+/// coding-agent signals (paths, identifiers, language hints) weight BM25 more
+/// heavily so random dense-neighbour noise cannot outrank explicit file or
+/// symbol searches. Final results are sorted by total score descending.
+/// RRF is parameter-light and scale-invariant, which makes it useful when
+/// fusing two scorers (cosine similarity, BM25) whose raw scores live on
+/// incompatible scales.
 ///
 /// `rrf_k` (default 60) is the standard constant from the original RRF
 /// paper; smaller values aggravate top-rank dominance, larger values flatten
