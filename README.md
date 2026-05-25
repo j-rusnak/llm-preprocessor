@@ -204,7 +204,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **BM25Index** | `bm25_index.hpp` | Okapi BM25 ranker with identifier-aware tokenisation. |
 | **RetrievalQuery** | `retrieval_query.hpp` | Shared query normalizer for terms, identifiers, paths, and language hints. |
 | **HybridRetriever** | `hybrid_retriever.hpp` | RRF fusion of `VectorStore` + `BM25Index` hits. |
-| **ContextPacker** | `context_packer.hpp` | Shared retrieved-context formatter with budget metadata for included and omitted chunks. |
+| **ContextPacker** | `context_packer.hpp` | Shared retrieved-context formatter with adaptive dedupe, score/file-diversity ordering, and budget metadata for included, omitted, and deduped chunks. |
 | **PromptCache** | `prompt_cache.hpp` | SQLite-backed cache of upstream responses, keyed by `(model, compiled request, chunk_ids)`. |
 | **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, stream cancellations, tokens saved, context packing, and per-model-family token totals. |
 | **RepoIndex** | `repo_index.hpp` | End-to-end chunk + embed + index over a repo, kept fresh by `FileWatcher`. |
@@ -226,7 +226,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **StreamingCompactor** | `streaming_compactor.hpp` | Phase 11 rolling chat-history summarizer; keeps long sessions under the context window. |
 | **AuthMiddleware** | `auth_middleware.hpp` | Phase 12 bearer + HMAC-SHA256 request authentication. |
 | **RateLimiter** | `rate_limiter.hpp` | Phase 12 per-key token-bucket rate limiter. |
-| **EffectivenessRunner** | `benchmarks/effectiveness_runner.cpp` | Standalone harness that measures cache speedup, rewriter compression, BM25/graph retrieval quality, A/B determinism, HMAC throughput, and rate-limit burst behaviour. Emits JSON for CI dashboards. |
+| **EffectivenessRunner** | `benchmarks/effectiveness_runner.cpp` | Standalone harness that measures cache speedup, context-packing quality, rewriter compression, BM25/graph retrieval quality, A/B determinism, HMAC throughput, and rate-limit burst behaviour. Emits JSON for CI dashboards. |
 
 ## Tech Stack
 
@@ -478,7 +478,9 @@ Endpoints:
   forwards to `upstream_url`, caches the response by
   `(model, compiled upstream request, included_chunk_ids)`.
   Requests with `"stream": true` are forwarded as `text/event-stream` and are
-  not cached.
+  not cached; downstream disconnects cancel forwarding without writing a
+  synthetic SSE error trailer, and `stream_idle_timeout_seconds` aborts stalled
+  upstream streams.
 - `GET /healthz` - liveness check.
 - `GET /stats` - JSON snapshot of `ProxyMetrics` (tokens saved, cache hits,
   upstream calls, auth/rate/request-size denials, upstream errors, stream
@@ -509,7 +511,7 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `upstream_timeout_seconds` | Overall upstream libcurl timeout | `60` |
 | `upstream_connect_timeout_seconds` | Upstream connection timeout | `10` |
 | `upstream_max_response_bytes` | Max buffered non-streaming upstream response size (`0` = disabled) | `0` |
-| `stream_idle_timeout_seconds` | Streaming idle timeout (`0` = disabled) | `0` |
+| `stream_idle_timeout_seconds` | Streaming idle timeout based on time since the last upstream byte (`0` = disabled) | `0` |
 | `tokenizer_mode` | Token estimator for budgets and telemetry: `"heuristic"` or `"model-calibrated"` | `"heuristic"` |
 | `model_tiers` | Optional array of `{name, upstream_url, model_name, api_key, max_context}` tier definitions | `[]` |
 | `model_routes` | Optional ordered array of `{bucket, min_request_chars, max_request_chars, tier}` routing rules | `[]` |

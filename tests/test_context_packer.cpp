@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -86,4 +87,71 @@ TEST(ContextPacker, ZeroBudgetKeepsAllChunks) {
     EXPECT_EQ(packed.included_chunk_ids.size(), 2u);
     EXPECT_TRUE(packed.omitted_chunk_ids.empty());
     EXPECT_FALSE(packed.truncated);
+}
+
+TEST(ContextPacker, DedupesRepeatedIdsAndContentFingerprints) {
+    preprocessor::ContextPackerConfig cfg;
+    cfg.include_header = false;
+    cfg.max_context_chars = 0;
+
+    const auto packed = preprocessor::pack_context(
+        {chunk(1, "a.cpp", "a", "same body"),
+         chunk(1, "a.cpp", "a", "same body"),
+         chunk(2, "b.cpp", "b", "same body"),
+         chunk(3, "c.cpp", "c", "unique body")},
+        cfg);
+
+    ASSERT_EQ(packed.included_chunk_ids.size(), 2u);
+    EXPECT_EQ(packed.included_chunk_ids[0], 1u);
+    EXPECT_EQ(packed.included_chunk_ids[1], 3u);
+    ASSERT_EQ(packed.deduped_chunk_ids.size(), 2u);
+    EXPECT_EQ(packed.deduped_chunk_ids[0], 1u);
+    EXPECT_EQ(packed.deduped_chunk_ids[1], 2u);
+    EXPECT_TRUE(packed.omitted_chunk_ids.empty());
+    EXPECT_FALSE(packed.truncated);
+}
+
+TEST(ContextPacker, CanDisableChunkDedupe) {
+    preprocessor::ContextPackerConfig cfg;
+    cfg.include_header = false;
+    cfg.max_context_chars = 0;
+    cfg.dedupe_chunks = false;
+
+    const auto packed = preprocessor::pack_context(
+        {chunk(1, "a.cpp", "a", "same body"),
+         chunk(1, "a.cpp", "a", "same body"),
+         chunk(2, "b.cpp", "b", "same body")},
+        cfg);
+
+    ASSERT_EQ(packed.included_chunk_ids.size(), 3u);
+    EXPECT_TRUE(packed.deduped_chunk_ids.empty());
+}
+
+TEST(ContextPacker, PreservesFileDiversityUnderTightBudget) {
+    preprocessor::ContextPackerConfig cfg;
+    cfg.include_header = false;
+    cfg.max_context_chars = 128;
+
+    const auto packed = preprocessor::pack_context(
+        {chunk(1, "src/alpha.cpp", "first", "int alpha = 1;"),
+         chunk(2, "src/alpha.cpp", "large", std::string(400, 'A')),
+         chunk(3, "src/beta.cpp", "second", "int beta = 2;")},
+        cfg);
+
+    EXPECT_NE(std::find(packed.included_chunk_ids.begin(),
+                        packed.included_chunk_ids.end(),
+                        1u),
+              packed.included_chunk_ids.end());
+    EXPECT_NE(std::find(packed.included_chunk_ids.begin(),
+                        packed.included_chunk_ids.end(),
+                        3u),
+              packed.included_chunk_ids.end());
+    EXPECT_EQ(std::find(packed.included_chunk_ids.begin(),
+                        packed.included_chunk_ids.end(),
+                        2u),
+              packed.included_chunk_ids.end());
+    EXPECT_TRUE(packed.truncated);
+    EXPECT_NE(packed.text.find("src/beta.cpp"), std::string::npos);
+    EXPECT_EQ(packed.text.find("src/alpha.cpp [L3-L9] large"),
+              std::string::npos);
 }

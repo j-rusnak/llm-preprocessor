@@ -146,6 +146,7 @@ See section 4.
 | Module | Metric |
 |---|---|
 | `PromptCache` | hit-rate, warm-vs-cold latency, speedup multiplier |
+| `ContextPacker` | included/omitted/deduped chunk counts, truncation rate, injected chars, cache-key stability |
 | `HeuristicCompressionRewriter` | char reduction %, token reduction %, original vs rewritten size |
 | `StreamingCompactor` | turns rolled, turns kept, char-budget compliance |
 | `EmbeddingCache` | round-trip latency, cold-vs-warm speedup |
@@ -169,13 +170,14 @@ Stderr prints a human-readable summary table:
 === LLM Preprocessor Effectiveness Report ===
 
 [PromptCache]          hit rate 100.0% | speedup 1.0x | warm 20.70 us vs cold 20.00 us
+[ContextPacker]        included 2 | omitted 1 | deduped 1 | chars 181/220 | cache-key stable=yes
 [PromptRewriter]       chars 1204 -> 782 (35.0%) | tokens 237 -> 150 (36.7%)
 [StreamingCompactor]   40 turns -> 9 kept + 31 rolled | 8690 -> 4913 chars (43.5%)
 [EmbeddingCache]       500 vectors | speedup 9.0x (cold 188.39 us -> warm 20.95 us)
 [DiffPatcher]          5988 B full vs 176 B diff (97.1% saved) | applied=yes
 [BM25Index]            17 docs / 8 queries | top-1 100.0% | top-3 100.0% | 37.69 us/query
 [GraphRetrieval]       seeds 2 -> 3 chunks | top-3 lift=yes | unrelated pollution=no
-[FixtureRetrieval]     4 files / 4 queries | top-3 100.0% | 125.00 us/query
+[FixtureRetrieval]     6 files / 6 queries | top-3 100.0% | 125.00 us/query
 [ModelRouter]          4/4 correct (100.0%) | 0.57 us/route
 [AbHarness]            10000 assigns | A=2496 B=2502 C=5002 | chi^2=0.01 (crit 9.21) | sticky=100/100
 [AuthMiddleware]       50000 HMAC verifies | 11.14 us/op | 89802/s
@@ -187,6 +189,9 @@ Stderr prints a human-readable summary table:
 ```jsonc
 {
   "prompt_cache":        { "hit_rate": 1.0, "speedup": 9.1, "warm_us": 20.7, "cold_us": 188.4 },
+  "context_packing":     { "included_chunks": 2, "omitted_chunks": 1,
+                           "deduped_chunks": 1, "truncation_rate": 0.333,
+                           "cache_key_stable_when_omitted_differs": true },
   "prompt_rewriter":     { "chars_in": 1204, "chars_out": 782, "char_pct": 0.350,
                            "tokens_in": 237, "tokens_out": 150, "token_pct": 0.367 },
   "streaming_compactor": { "turns_in": 40, "kept": 9, "rolled": 31,
@@ -196,7 +201,7 @@ Stderr prints a human-readable summary table:
   "bm25":                { "docs": 17, "queries": 8, "top1": 1.0, "top3": 1.0, "us_per_query": 37.7 },
   "graph_retrieval":     { "seed_count": 2, "expanded_count": 3,
                            "top3_lift": true, "unrelated_pollution": false },
-  "fixture_retrieval":   { "files": 4, "queries": 4, "top3_pct": 100.0,
+  "fixture_retrieval":   { "files": 6, "queries": 6, "top3_pct": 100.0,
                            "by_language": {"cpp": {"top3_hit": true}} },
   "model_router":        { "cases": 4, "correct": 4, "accuracy": 1.0, "us_per_route": 0.57 },
   "ab_harness":          { "assigns": 10000, "counts": {"A":2496,"B":2502,"C":5002},
@@ -217,6 +222,8 @@ The `Effectiveness_*` gtest cases lock in conservative floors:
 | `Effectiveness_PromptRewriter.ReducesTokenCount` | rewritten < original |
 | `Effectiveness_StreamingCompactor.StaysUnderHardCap` | kept window ≤ `max_total_chars` and `rolled > 0` |
 | `Effectiveness_PromptCache.HitsAreFasterThanFreshComputeBy3x` | cold/warm ≥ 3x |
+| `Effectiveness_ContextPacking.DedupesAndPreservesDiverseHighSignalChunks` | duplicate chunks suppressed while high-signal files still fit the context budget |
+| `Effectiveness_ContextPacking.CacheKeyStableWhenOmittedChunksDiffer` | cache key depends on included chunk ids, not budget-omitted candidates |
 | `Effectiveness_EmbeddingCache.RoundTripsVectorsByModelId` | per-model isolation |
 | `Effectiveness_DiffPatcher.DiffIsSmallerThanFullFile` | diff < full content |
 | `Effectiveness_BM25.RetrievesCorrectDocInTop3` | top-1 correct on 2 queries |
@@ -251,7 +258,10 @@ curl -s http://127.0.0.1:8080/v1/chat/completions `
     -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"explain main()"}]}'
 ```
 
-Streaming requests preserve SSE framing and bypass `PromptCache`:
+Streaming requests preserve SSE framing and bypass `PromptCache`. Client
+disconnects are counted as stream cancellations without adding a synthetic SSE
+error trailer or cache entry. Stalled upstream streams are aborted by
+`stream_idle_timeout_seconds` and emit an SSE error followed by `[DONE]`:
 
 ```powershell
 curl -N http://127.0.0.1:8080/v1/chat/completions `
@@ -293,7 +303,9 @@ cache.put(key, upstream_response);
 The key includes the model id, the full compiled upstream request, and the ids
 of chunks that fit the injected context budget, so changes to parameters such as
 `temperature`, tools, or injected context do not collide while omitted chunks do
-not create avoidable misses.
+not create avoidable misses. `ContextPacker` records omitted and deduped chunk
+ids separately so telemetry can explain why a retrieved candidate was not sent
+upstream.
 
 ### 5.5 `HeuristicCompressionRewriter` (Phase 5)
 

@@ -8,6 +8,7 @@
 #include "ab_harness.hpp"
 #include "auth_middleware.hpp"
 #include "bm25_index.hpp"
+#include "context_packer.hpp"
 #include "diff_patcher.hpp"
 #include "embedding_cache.hpp"
 #include "code_chunker.hpp"
@@ -20,12 +21,14 @@
 #include "prompt_rewriter.hpp"
 #include "rate_limiter.hpp"
 #include "repo_index.hpp"
+#include "retrieval_query.hpp"
 #include "streaming_compactor.hpp"
 #include "sync_endpoint.hpp"
 #include "symbol_graph.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -122,6 +125,20 @@ std::unique_ptr<preprocessor::RepoIndex> retrieval_index() {
     cfg.embedding_dim = 16;
     cfg.watch_for_changes = false;
     return std::make_unique<preprocessor::RepoIndex>(emb, chunker, cfg);
+}
+
+preprocessor::RetrievedChunk retrieved_chunk(std::uint64_t id,
+                                             std::string file,
+                                             std::string text,
+                                             float score = 1.0f) {
+    preprocessor::RetrievedChunk r;
+    r.chunk = retrieval_chunk(id, std::move(file), std::move(text));
+    r.score = score;
+    return r;
+}
+
+bool has_id(const std::vector<std::uint64_t>& ids, std::uint64_t id) {
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
 }
 
 void hydrate_retrieval_chunks(
@@ -277,6 +294,72 @@ TEST(Effectiveness_BM25, RetrievesCorrectDocInTop3) {
     EXPECT_EQ(h2[0].id, 4u);
 }
 
+// ---------- ContextPacker ----------
+TEST(Effectiveness_ContextPacking, DedupesAndPreservesDiverseHighSignalChunks) {
+    preprocessor::ContextPackerConfig cfg;
+    cfg.include_header = false;
+    cfg.max_context_chars = 220;
+
+    const auto packed = preprocessor::pack_context(
+        {
+            retrieved_chunk(1,
+                            "src/proxy/auth.cpp",
+                            "verify HMAC X-Preprocessor-Authorization bearer token",
+                            0.99f),
+            retrieved_chunk(2,
+                            "src/proxy/auth.cpp",
+                            std::string(500, 'A'),
+                            0.98f),
+            retrieved_chunk(3,
+                            "cmake/package.cmake",
+                            "install package config onnxruntime redistributable",
+                            0.70f),
+            retrieved_chunk(4,
+                            "docs/auth.md",
+                            "verify HMAC X-Preprocessor-Authorization bearer token",
+                            0.60f),
+        },
+        cfg);
+
+    EXPECT_TRUE(has_id(packed.included_chunk_ids, 1));
+    EXPECT_TRUE(has_id(packed.included_chunk_ids, 3));
+    EXPECT_TRUE(has_id(packed.omitted_chunk_ids, 2));
+    EXPECT_TRUE(has_id(packed.deduped_chunk_ids, 4));
+    EXPECT_TRUE(packed.truncated);
+    EXPECT_LE(packed.chars_used, cfg.max_context_chars);
+    EXPECT_NE(packed.text.find("src/proxy/auth.cpp"), std::string::npos);
+    EXPECT_NE(packed.text.find("cmake/package.cmake"), std::string::npos);
+}
+
+TEST(Effectiveness_ContextPacking, CacheKeyStableWhenOmittedChunksDiffer) {
+    preprocessor::ContextPackerConfig cfg;
+    cfg.include_header = false;
+    cfg.max_context_chars = 72;
+
+    const auto first = preprocessor::pack_context(
+        {
+            retrieved_chunk(10, "src/a.cpp", "int stable = 1;", 1.0f),
+            retrieved_chunk(20, "src/b.cpp", std::string(500, 'B'), 0.5f),
+        },
+        cfg);
+    const auto second = preprocessor::pack_context(
+        {
+            retrieved_chunk(10, "src/a.cpp", "int stable = 1;", 1.0f),
+            retrieved_chunk(30, "src/c.cpp", std::string(500, 'C'), 0.5f),
+        },
+        cfg);
+
+    ASSERT_EQ(first.included_chunk_ids, second.included_chunk_ids);
+    ASSERT_TRUE(first.truncated);
+    ASSERT_TRUE(second.truncated);
+
+    const auto first_key =
+        preprocessor::PromptCache::make_key("model", "compiled", first.included_chunk_ids);
+    const auto second_key =
+        preprocessor::PromptCache::make_key("model", "compiled", second.included_chunk_ids);
+    EXPECT_EQ(first_key, second_key);
+}
+
 TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
     const auto root = repo_path("tests/fixtures/retrieval");
     ASSERT_TRUE(fs::exists(root)) << root.string();
@@ -287,7 +370,7 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
     index->attach_symbol_graph(&graph, &extractor);
     index->index_path(root.string());
 
-    ASSERT_GE(index->file_count(), 4u);
+    ASSERT_GE(index->file_count(), 6u);
 
     struct QueryCase {
         std::string query;
@@ -310,6 +393,14 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
             "production deployment loopback auth unsafe remote proxy request size",
             "docs/production.md"
         },
+        {
+            "cmake package config install target onnx runtime redistributable vcpkg",
+            "cmake/CMakeLists.txt"
+        },
+        {
+            "hmac bearer token x preprocessor authorization timestamp replay skew",
+            "security/auth_middleware_slice.cpp"
+        },
     };
 
     for (const auto& c : cases) {
@@ -327,6 +418,24 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
         }
         EXPECT_TRUE(found) << "query=" << c.query << "\nhits:\n" << files;
     }
+}
+
+TEST(Effectiveness_Retrieval, PathAndLanguageHintsImproveTop3) {
+    preprocessor::BM25Index idx;
+    idx.add(1, "TypeScript file handles fetch cancellation and stale results");
+    idx.add(2,
+            "ts scratch notes plus unrelated deployment archive package proxy "
+            "vector cache graph symbol tokenizer compiler metrics sync");
+
+    const auto raw_hits = idx.search("ts", 3);
+    ASSERT_FALSE(raw_hits.empty());
+    EXPECT_EQ(raw_hits[0].id, 2u);
+
+    const auto parsed = preprocessor::parse_retrieval_query("ts");
+    const auto normalized_hits =
+        idx.search(preprocessor::build_lexical_query_text(parsed), 3);
+    ASSERT_FALSE(normalized_hits.empty());
+    EXPECT_EQ(normalized_hits[0].id, 1u);
 }
 
 // ---------- Retrieval / Graph Expansion ----------

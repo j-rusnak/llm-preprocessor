@@ -25,8 +25,14 @@ jobs:
           $name = "onnxruntime-win-x64-$version"
           $zip = "$name.zip"
           $url = "https://github.com/microsoft/onnxruntime/releases/download/v$version/$zip"
+          if (Test-Path -LiteralPath $name) {
+            Remove-Item -LiteralPath $name -Recurse -Force
+          }
+          if (Test-Path -LiteralPath $zip) {
+            Remove-Item -LiteralPath $zip -Force
+          }
           Invoke-WebRequest -Uri $url -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath .
+          Expand-Archive -LiteralPath $zip -DestinationPath . -Force
 
       - name: Configure
         shell: pwsh

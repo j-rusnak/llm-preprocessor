@@ -63,6 +63,10 @@ std::size_t curl_write_cb(char* ptr,
 struct StreamingSink {
     httplib::DataSink* sink = nullptr;
     bool cancelled = false;
+    bool idle_timed_out = false;
+    long idle_timeout_seconds = 0;
+    std::chrono::steady_clock::time_point last_activity =
+        std::chrono::steady_clock::now();
 };
 
 std::size_t curl_stream_cb(char* ptr, std::size_t size, std::size_t nmemb, void* userdata) {
@@ -73,7 +77,24 @@ std::size_t curl_stream_cb(char* ptr, std::size_t size, std::size_t nmemb, void*
         out->cancelled = true;
         return 0;
     }
+    out->last_activity = std::chrono::steady_clock::now();
     return bytes;
+}
+
+int curl_stream_progress_cb(void* userdata,
+                            curl_off_t,
+                            curl_off_t,
+                            curl_off_t,
+                            curl_off_t) {
+    auto* out = static_cast<StreamingSink*>(userdata);
+    if (!out || out->cancelled || out->idle_timeout_seconds <= 0) return 0;
+    const auto elapsed =
+        std::chrono::steady_clock::now() - out->last_activity;
+    if (elapsed >= std::chrono::seconds(out->idle_timeout_seconds)) {
+        out->idle_timed_out = true;
+        return 1;
+    }
+    return 0;
 }
 
 std::string trim_header_value(std::string s) {
@@ -307,13 +328,19 @@ bool stream_upstream(const std::string& url,
         return true;
     }
 
-    StreamingSink stream{&sink};
+    StreamingSink stream;
+    stream.sink = &sink;
+    stream.idle_timeout_seconds = idle_timeout_seconds;
+    stream.last_activity = std::chrono::steady_clock::now();
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_stream_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &stream);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curl_stream_progress_cb);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &stream);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     if (timeout_seconds > 0) {
         curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
     }
@@ -343,7 +370,10 @@ bool stream_upstream(const std::string& url,
         if (metrics) {
             metrics->on_upstream_error();
         }
-        write_sse_error(sink, std::string("upstream: ") + curl_easy_strerror(rc));
+        const std::string message = stream.idle_timed_out
+            ? "upstream stream idle timeout"
+            : std::string("upstream: ") + curl_easy_strerror(rc);
+        write_sse_error(sink, message);
         write_sse_done(sink);
     }
     curl_slist_free_all(headers);

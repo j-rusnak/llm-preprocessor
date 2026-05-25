@@ -6,6 +6,7 @@
 // synthetic inputs and reports quantitative effectiveness numbers:
 //
 //   - PromptCache:        hit speedup, hit-rate under realistic traffic
+//   - ContextPacker:      chunk inclusion, truncation, dedupe, cache-key stability
 //   - HeuristicCompressionRewriter: char / token reduction on C/C++ context
 //   - StreamingCompactor: char reduction across long chat histories
 //   - EmbeddingCache:     persistent hit vs cold recompute speedup
@@ -25,6 +26,7 @@
 #include "auth_middleware.hpp"
 #include "bm25_index.hpp"
 #include "code_chunker.hpp"
+#include "context_packer.hpp"
 #include "diff_patcher.hpp"
 #include "embedding_cache.hpp"
 #include "graph_aware_retriever.hpp"
@@ -180,6 +182,16 @@ preprocessor::CodeChunk make_chunk(std::uint64_t id,
     return c;
 }
 
+preprocessor::RetrievedChunk make_retrieved_chunk(std::uint64_t id,
+                                                  std::string file,
+                                                  std::string text,
+                                                  float score) {
+    preprocessor::RetrievedChunk r;
+    r.chunk = make_chunk(id, std::move(file), std::move(text));
+    r.score = score;
+    return r;
+}
+
 std::unique_ptr<preprocessor::RepoIndex> make_retrieval_index() {
     auto emb = std::make_shared<RetrievalEmbedder>(16);
     auto chunker = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
@@ -264,6 +276,74 @@ json measure_prompt_cache() {
         {"avg_warm_us", warm_us / kRequests},
         {"cold_bytes", cold_bytes},
         {"warm_bytes", warm_bytes},
+    };
+}
+
+// --------------------------------------------------------------------------
+// ContextPacker: adaptive budget use, duplicate suppression, cache-key safety.
+// --------------------------------------------------------------------------
+json measure_context_packing() {
+    preprocessor::ContextPackerConfig cfg;
+    cfg.include_header = false;
+    cfg.max_context_chars = 220;
+
+    const std::vector<preprocessor::RetrievedChunk> chunks = {
+        make_retrieved_chunk(1,
+                             "src/proxy/auth.cpp",
+                             "verify HMAC X-Preprocessor-Authorization bearer token",
+                             0.99f),
+        make_retrieved_chunk(2,
+                             "src/proxy/auth.cpp",
+                             std::string(500, 'A'),
+                             0.98f),
+        make_retrieved_chunk(3,
+                             "cmake/package.cmake",
+                             "install package config onnxruntime redistributable",
+                             0.70f),
+        make_retrieved_chunk(4,
+                             "docs/auth.md",
+                             "verify HMAC X-Preprocessor-Authorization bearer token",
+                             0.60f),
+    };
+
+    const auto packed = preprocessor::pack_context(chunks, cfg);
+
+    const auto stable_a = preprocessor::pack_context(
+        {
+            make_retrieved_chunk(10, "src/a.cpp", "int stable = 1;", 1.0f),
+            make_retrieved_chunk(20, "src/b.cpp", std::string(500, 'B'), 0.5f),
+        },
+        preprocessor::ContextPackerConfig{72, false});
+    const auto stable_b = preprocessor::pack_context(
+        {
+            make_retrieved_chunk(10, "src/a.cpp", "int stable = 1;", 1.0f),
+            make_retrieved_chunk(30, "src/c.cpp", std::string(500, 'C'), 0.5f),
+        },
+        preprocessor::ContextPackerConfig{72, false});
+    const auto key_a =
+        preprocessor::PromptCache::make_key("model", "compiled", stable_a.included_chunk_ids);
+    const auto key_b =
+        preprocessor::PromptCache::make_key("model", "compiled", stable_b.included_chunk_ids);
+
+    const auto considered = packed.included_chunk_ids.size() +
+                            packed.omitted_chunk_ids.size();
+    const double truncation_rate = considered == 0
+        ? 0.0
+        : double(packed.omitted_chunk_ids.size()) / double(considered);
+
+    return {
+        {"input_chunks", chunks.size()},
+        {"included_chunks", packed.included_chunk_ids.size()},
+        {"omitted_chunks", packed.omitted_chunk_ids.size()},
+        {"deduped_chunks", packed.deduped_chunk_ids.size()},
+        {"duplicate_suppression_pct",
+         100.0 * packed.deduped_chunk_ids.size() / chunks.size()},
+        {"truncated", packed.truncated},
+        {"truncation_rate", truncation_rate},
+        {"budget_chars", cfg.max_context_chars},
+        {"chars_used", packed.chars_used},
+        {"injected_chars", packed.text.size()},
+        {"cache_key_stable_when_omitted_differs", key_a == key_b},
     };
 }
 
@@ -569,6 +649,16 @@ json measure_fixture_retrieval() {
             "production deployment loopback auth unsafe remote proxy request size",
             "docs/production.md"
         },
+        {
+            "cmake",
+            "cmake package config install target onnx runtime redistributable vcpkg",
+            "cmake/CMakeLists.txt"
+        },
+        {
+            "security",
+            "hmac bearer token x preprocessor authorization timestamp replay skew",
+            "security/auth_middleware_slice.cpp"
+        },
     };
 
     json by_language = json::object();
@@ -770,6 +860,14 @@ void print_summary(const json& report) {
       <<" | warm "<<us(pc["avg_warm_us"])
       <<" vs cold "<<us(pc["avg_cold_us"])<<"\n";
 
+    const auto& cp = report["context_packing"];
+    s << "[ContextPacker]        included "<<cp["included_chunks"]
+      <<" | omitted "<<cp["omitted_chunks"]
+      <<" | deduped "<<cp["deduped_chunks"]
+      <<" | chars "<<cp["chars_used"]<<"/"<<cp["budget_chars"]
+      <<" | cache-key stable="
+      <<(cp["cache_key_stable_when_omitted_differs"] ? "yes" : "no")<<"\n";
+
     const auto& rw = report["prompt_rewriter"];
     s << "[PromptRewriter]       chars "<<rw["chars_in"]<<" -> "<<rw["chars_out"]
       <<" ("<<pct(rw["char_reduction_pct"])
@@ -837,6 +935,7 @@ int main() {
     json report;
     try {
         report["prompt_cache"]        = measure_prompt_cache();
+        report["context_packing"]     = measure_context_packing();
         report["prompt_rewriter"]     = measure_prompt_rewriter();
         report["streaming_compactor"] = measure_streaming_compactor();
         report["embedding_cache"]     = measure_embedding_cache();
