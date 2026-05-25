@@ -137,6 +137,27 @@ Outputs PNG charts into `benchmarks\results\`. See
 
 See section 4.
 
+### 3.5 Release candidate gate
+
+Run the complete RC gate before tagging or publishing local release artifacts:
+
+```powershell
+$trackedIgnored = git ls-files -ci --exclude-standard
+if ($trackedIgnored) {
+  throw "Tracked ignored files remain:`n$($trackedIgnored -join "`n")"
+}
+
+cmake --build build
+ctest --test-dir build --output-on-failure
+.\build\smoke_runner.exe
+.\build\effectiveness_runner.exe
+.\build\preprocessor_app.exe --version
+cmake --install build --prefix build\install-check
+```
+
+See [Release Checklist](RELEASE.md) for the full release boundary and
+deployment checklist.
+
 ---
 
 ## 4. Effectiveness runner

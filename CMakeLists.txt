@@ -176,6 +176,29 @@ target_link_libraries(preprocessor_lib PUBLIC
 add_executable(preprocessor_app src/main.cpp)
 target_link_libraries(preprocessor_app PRIVATE preprocessor_lib)
 
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE LLM_PREPROCESSOR_GIT_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT LLM_PREPROCESSOR_GIT_COMMIT)
+    set(LLM_PREPROCESSOR_GIT_COMMIT "unknown")
+endif()
+
+target_compile_definitions(preprocessor_app PRIVATE
+    PREPROCESSOR_VERSION="${PROJECT_VERSION}"
+    PREPROCESSOR_GIT_COMMIT="${LLM_PREPROCESSOR_GIT_COMMIT}"
+    PREPROCESSOR_BUILD_CONFIG="$<CONFIG>"
+)
+
+add_test(NAME PreprocessorApp.Version COMMAND preprocessor_app --version)
+set_tests_properties(PreprocessorApp.Version PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "LLM Preprocessor v${PROJECT_VERSION} \\([A-Za-z0-9_ -]+, commit [A-Za-z0-9]+\\)"
+)
+
 # --- 4. Define the Test Executable ---
 include(GoogleTest)
 
