@@ -1,9 +1,8 @@
 // LLM Preprocessor - Effectiveness Runner
 //
-// Measures the *real* value each subsystem delivers. Unlike `benchmark_runner`
-// (which focuses on the legacy semantic router and requires the ONNX model),
-// this runner exercises every Phase 5-12 module against deterministic
-// synthetic inputs and reports quantitative effectiveness numbers:
+// Measures the *real* value each coding-agent preprocessor subsystem delivers
+// against deterministic synthetic inputs and reports quantitative effectiveness
+// numbers:
 //
 //   - PromptCache:        hit speedup, hit-rate under realistic traffic
 //   - ContextPacker:      chunk inclusion, truncation, dedupe, cache-key stability
@@ -137,7 +136,7 @@ std::vector<std::string> sample_doc_corpus() {
         "Configuration loader reads JSON files and validates required keys.",
         "Tokenizer wraps WordPiece encoding for BERT-class embedding models.",
         "Embedding engine runs ONNX inference and pools the last hidden state.",
-        "Intent router computes cosine similarity between query and intents.",
+        "Intent classifier buckets coding prompts for model and template routing.",
         "Chat history store persists conversation turns in SQLite.",
         "Prompt compiler assembles the final JSON payload for upstream models.",
         "BM25 keyword index ranks documents by Okapi term frequency.",

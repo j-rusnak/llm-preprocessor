@@ -79,25 +79,19 @@ endif()
 
 # --- 2. Define your Core Preprocessor Library ---
 #
-# Phase 0 modules:
-#   chat_history_store  - SQLite chat memory (replaces MemoryEngine)
+# Foundation modules:
 #   vector_store        - HNSW ANN index for code-chunk embeddings
-#   llm_tokenizer       - downstream-LLM token budgeting (heuristic for now)
-#   code_chunker        - line-window chunker; tree-sitter slot in Phase 1
+#   llm_tokenizer       - downstream-LLM token budgeting
+#   code_chunker        - line-window and brace-aware chunkers
 #   file_watcher        - efsw wrapper for incremental re-indexing
 add_library(preprocessor_lib
-    src/intent_router.cpp
     src/embedding_engine.cpp
-    src/context_gatherer.cpp
     src/context_packer.cpp
     src/tokenizer.cpp
-    src/chat_history_store.cpp
     src/vector_store.cpp
     src/llm_tokenizer.cpp
     src/code_chunker.cpp
     src/file_watcher.cpp
-    src/prompt_compiler.cpp
-    src/text_sanitizer.cpp
     src/config_loader.cpp
     # Phase 1 modules:
     src/bm25_index.cpp
@@ -148,7 +142,7 @@ if(LLM_PREPROCESSOR_WITH_LLAMA_CPP)
     # option is enabled. Left as a TODO so the dependency stays opt-in.
 endif()
 
-# --- Phase 0 dependencies (vcpkg manifest mode) ---
+# --- Foundation dependencies (vcpkg manifest mode) ---
 find_package(hnswlib CONFIG REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 find_package(efsw CONFIG REQUIRED)
@@ -198,16 +192,16 @@ set_tests_properties(PreprocessorApp.Version PROPERTIES
     PASS_REGULAR_EXPRESSION
         "LLM Preprocessor v${PROJECT_VERSION} \\([A-Za-z0-9_ -]+, commit [A-Za-z0-9]+\\)"
 )
+add_test(NAME PreprocessorApp.Help COMMAND preprocessor_app --help)
+set_tests_properties(PreprocessorApp.Help PROPERTIES
+    PASS_REGULAR_EXPRESSION
+        "middleware for AI coding agents"
+)
 
 # --- 4. Define the Test Executable ---
 include(GoogleTest)
 
 add_executable(preprocessor_tests
-    tests/test_text_sanitizer.cpp
-    tests/test_intent_router.cpp
-    tests/test_chat_history_store.cpp
-    tests/test_prompt_compiler.cpp
-    tests/test_context_gatherer.cpp
     tests/test_context_packer.cpp
     tests/test_config_loader.cpp
     tests/test_tokenizer.cpp
@@ -257,11 +251,8 @@ target_link_libraries(preprocessor_tests PRIVATE
 
 gtest_add_tests(TARGET preprocessor_tests)
 
-# --- 5. Benchmark executables ---
-add_executable(benchmark_runner benchmarks/benchmark_runner.cpp)
-target_link_libraries(benchmark_runner PRIVATE preprocessor_lib)
-
-# Phase 5-12 effectiveness harness (no ONNX model required).
+# --- 5. Effectiveness executable ---
+# Coding-agent middleware effectiveness harness (no ONNX model required).
 add_executable(effectiveness_runner benchmarks/effectiveness_runner.cpp)
 target_link_libraries(effectiveness_runner PRIVATE preprocessor_lib)
 
@@ -327,7 +318,7 @@ install(FILES
 
 # --- 7. Copy ONNX Runtime DLL next to executables on Windows ---
 if(WIN32)
-    foreach(_tgt preprocessor_app preprocessor_tests benchmark_runner effectiveness_runner)
+    foreach(_tgt preprocessor_app preprocessor_tests effectiveness_runner)
         foreach(_ort_runtime ${LLM_PREPROCESSOR_ORT_RUNTIME_FILES})
             add_custom_command(TARGET ${_tgt} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -337,10 +328,10 @@ if(WIN32)
     endforeach()
 endif()
 
-# --- 8. Integration smoke-test runner (Phase 0 framework) ---
+# --- 8. Integration smoke-test runner ---
 #
 # Exercises the new modules end-to-end against a small synthetic repo. Not a
-# unit test; intended to be run manually or in CI to validate the full Phase 0
+# unit test; intended to be run manually or in CI to validate the full
 # pipeline (chunk -> embed -> index -> retrieve -> tokenize).
 add_executable(smoke_runner tests/smoke_runner.cpp)
 target_link_libraries(smoke_runner PRIVATE preprocessor_lib)

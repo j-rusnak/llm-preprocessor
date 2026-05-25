@@ -5,7 +5,7 @@ for driving each module from the command line, a config file, or as a library.
 
 - [1. One-command quick start](#1-one-command-quick-start)
 - [2. Build environment](#2-build-environment)
-- [3. The four test surfaces](#3-the-four-test-surfaces)
+- [3. Test surfaces](#3-test-surfaces)
 - [4. Effectiveness runner — what it measures and how to read it](#4-effectiveness-runner)
 - [5. Feature-by-feature usage](#5-feature-by-feature-usage)
 - [6. Production deployment recipes](#6-production-deployment-recipes)
@@ -32,7 +32,7 @@ Expected:
 |---|---|
 | `cmake --install` | Installs `LLMPreprocessorConfig.cmake` and ONNX Runtime files under `build\install` |
 | `ctest` | `100% tests passed, 0 tests failed` |
-| `smoke_runner.exe` | `Summary: 54 passed, 0 failed.` |
+| `smoke_runner.exe` | `Summary: 53 passed, 0 failed.` |
 | `effectiveness_runner.exe` | Exit 0, summary table on stderr, JSON on stdout |
 
 ---
@@ -87,7 +87,7 @@ Expected files include `LLMPreprocessorTargets.cmake`,
 `LLMPreprocessorConfig.cmake`, `LLMPreprocessorConfigVersion.cmake`,
 `onnxruntime.dll`, and `onnxruntime_providers_shared.dll` on Windows.
 
-## 3. The four test surfaces
+## 3. Test surfaces
 
 ### 3.1 Unit tests (Google Test)
 
@@ -109,9 +109,9 @@ List every test case:
 .\build\preprocessor_tests.exe --gtest_list_tests
 ```
 
-### 3.2 Smoke runner (54 stages)
+### 3.2 Smoke runner (53 stages)
 
-End-to-end, in-memory rehearsal of every Phase 0-12 module. No ONNX model
+End-to-end, in-memory rehearsal of the local middleware modules. No ONNX model
 required (deterministic fake embedder).
 
 ```powershell
@@ -121,23 +121,11 @@ required (deterministic fake embedder).
 
 Exit code is `0` on full pass — safe for CI.
 
-### 3.3 Benchmark runner (router latency / accuracy)
-
-Targets the **legacy semantic router** path with 31 prompts:
-
-```powershell
-.\build\benchmark_runner.exe > benchmarks\results\benchmark_data.json
-python benchmarks\visualize.py
-```
-
-Outputs PNG charts into `benchmarks\results\`. See
-[Benchmarks & Visualizations](../README.md#benchmarks--visualizations).
-
-### 3.4 Effectiveness runner (Phase 5-12 quality gates)
+### 3.3 Effectiveness runner (Phase 5-12 quality gates)
 
 See section 4.
 
-### 3.5 Release candidate gate
+### 3.4 Release candidate gate
 
 Run the complete RC gate before tagging or publishing local release artifacts:
 
