@@ -70,6 +70,57 @@ TEST(RegexSymbolExtractor, ExtractsClassStructEnum) {
     EXPECT_TRUE(en);
 }
 
+TEST(RegexSymbolExtractor, ExtractsTypeScriptExportsAndArrowFunctions) {
+    RegexSymbolExtractor ex;
+    auto c = make_chunk(4, "agent.ts", 1,
+        "export function parseRoute(input: string) { return input.trim(); }\n"
+        "export class AgentRunner {}\n"
+        "const buildPrompt = (request: Request) => parseRoute(request.path);\n"
+        "export const routeTable = { parseRoute };\n");
+    auto out = ex.extract(c);
+    bool parse_route = false;
+    bool runner = false;
+    bool build_prompt = false;
+    bool route_table = false;
+    for (const auto& d : out.defs) {
+        if (d.name == "parseRoute" && d.kind == SymbolKind::Function) {
+            parse_route = true;
+        }
+        if (d.name == "AgentRunner" && d.kind == SymbolKind::Class) {
+            runner = true;
+        }
+        if (d.name == "buildPrompt" && d.kind == SymbolKind::Function) {
+            build_prompt = true;
+        }
+        if (d.name == "routeTable" && d.kind == SymbolKind::Variable) {
+            route_table = true;
+        }
+    }
+    EXPECT_TRUE(parse_route);
+    EXPECT_TRUE(runner);
+    EXPECT_TRUE(build_prompt);
+    EXPECT_TRUE(route_table);
+}
+
+TEST(RegexSymbolExtractor, IndexesQualifiedCppMethodBySimpleName) {
+    RegexSymbolExtractor ex;
+    auto c = make_chunk(5, "server.cpp", 40,
+        "void HttpServer::Listen() { accept_loop(); }\n");
+    auto out = ex.extract(c);
+    bool qualified = false;
+    bool simple = false;
+    for (const auto& d : out.defs) {
+        if (d.name == "HttpServer::Listen" && d.kind == SymbolKind::Method) {
+            qualified = true;
+        }
+        if (d.name == "Listen" && d.kind == SymbolKind::Method) {
+            simple = true;
+        }
+    }
+    EXPECT_TRUE(qualified);
+    EXPECT_TRUE(simple);
+}
+
 TEST(SymbolGraph, UpdateAndQueryRoundTrip) {
     SymbolGraph g;
     RegexSymbolExtractor ex;

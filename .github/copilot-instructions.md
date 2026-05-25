@@ -145,6 +145,10 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   mode buckets routed model names into coarse families (`gpt-4o`, `gpt-4.1`,
   `gpt-5`, OpenAI reasoning, Claude, Gemini, default) and `ProxyMetrics`
   exposes `/stats.tokens_by_model_family` with original/compiled/saved totals.
+- **Symbol extraction upgrade (DONE):** `RegexSymbolExtractor` covers JS/TS
+  exported functions/classes, arrow function assignments, exported variables,
+  and aliases qualified C++ method definitions by simple name for structural
+  lookup and graph expansion.
 - **Effectiveness harness (DONE):**
   `benchmarks/effectiveness_runner.cpp` standalone runner emits a
   JSON report (stdout) + human summary table (stderr) covering every
