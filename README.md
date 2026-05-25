@@ -202,7 +202,9 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **LLMTokenizer** | `llm_tokenizer.hpp` | Downstream-LLM token budgeter (`HeuristicLLMTokenizer` and model-family calibrated mode). |
 | **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final OpenAI-style JSON payload. |
 | **BM25Index** | `bm25_index.hpp` | Okapi BM25 ranker with identifier-aware tokenisation. |
+| **RetrievalQuery** | `retrieval_query.hpp` | Shared query normalizer for terms, identifiers, paths, and language hints. |
 | **HybridRetriever** | `hybrid_retriever.hpp` | RRF fusion of `VectorStore` + `BM25Index` hits. |
+| **ContextPacker** | `context_packer.hpp` | Shared retrieved-context formatter with budget metadata for included and omitted chunks. |
 | **PromptCache** | `prompt_cache.hpp` | SQLite-backed cache of upstream responses, keyed by `(model, compiled request, chunk_ids)`. |
 | **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, stream cancellations, tokens saved, and per-model-family token totals. |
 | **RepoIndex** | `repo_index.hpp` | End-to-end chunk + embed + index over a repo, kept fresh by `FileWatcher`. |

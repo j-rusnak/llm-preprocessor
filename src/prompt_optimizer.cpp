@@ -1,8 +1,8 @@
 #include "prompt_optimizer.hpp"
 
+#include "context_packer.hpp"
 #include "repo_index.hpp"  // RetrievedChunk + CodeChunk
 
-#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -10,32 +10,12 @@ namespace preprocessor {
 
 namespace {
 
-std::string build_context_block(const std::vector<RetrievedChunk>& chunks,
-                                std::size_t max_chars) {
-    if (chunks.empty()) return {};
-    std::ostringstream out;
-    std::size_t used = 0;
-    for (const auto& rc : chunks) {
-        std::ostringstream entry;
-        entry << "\n--- " << rc.chunk.file_path
-              << " [L" << rc.chunk.start_line << "-L" << rc.chunk.end_line << "]";
-        if (!rc.chunk.symbol.empty()) entry << " " << rc.chunk.symbol;
-        entry << " ---\n" << rc.chunk.text << "\n";
-        const std::string s = entry.str();
-        if (max_chars > 0 && used + s.size() > max_chars) break;
-        out << s;
-        used += s.size();
-    }
-    return out.str();
-}
-
 std::string plain_context_message(const std::vector<RetrievedChunk>& chunks,
                                   std::size_t max_chars) {
-    if (chunks.empty()) return {};
-    std::ostringstream out;
-    out << "Retrieved code context (most relevant first):\n";
-    out << build_context_block(chunks, max_chars);
-    return out.str();
+    ContextPackerConfig cfg;
+    cfg.max_context_chars = max_chars;
+    cfg.include_header = true;
+    return pack_context(chunks, cfg).text;
 }
 
 } // namespace
@@ -85,7 +65,10 @@ PromptOptimizer::Result PromptOptimizer::optimise(
     PromptRenderInput in;
     in.user_message = user_message;
     in.bucket = to_string(r.bucket);
-    in.context = build_context_block(chunks, config_.max_context_chars);
+    ContextPackerConfig pack_cfg;
+    pack_cfg.max_context_chars = config_.max_context_chars;
+    pack_cfg.include_header = false;
+    in.context = pack_context(chunks, pack_cfg).text;
     if (config_.include_project_card && has_card_) {
         in.project_card = card_.to_markdown();
     }

@@ -89,6 +89,7 @@ add_library(preprocessor_lib
     src/intent_router.cpp
     src/embedding_engine.cpp
     src/context_gatherer.cpp
+    src/context_packer.cpp
     src/tokenizer.cpp
     src/chat_history_store.cpp
     src/vector_store.cpp
@@ -100,6 +101,7 @@ add_library(preprocessor_lib
     src/config_loader.cpp
     # Phase 1 modules:
     src/bm25_index.cpp
+    src/retrieval_query.cpp
     src/hybrid_retriever.cpp
     src/prompt_cache.cpp
     src/proxy_metrics.cpp
@@ -183,6 +185,7 @@ add_executable(preprocessor_tests
     tests/test_chat_history_store.cpp
     tests/test_prompt_compiler.cpp
     tests/test_context_gatherer.cpp
+    tests/test_context_packer.cpp
     tests/test_config_loader.cpp
     tests/test_tokenizer.cpp
     tests/test_vector_store.cpp
@@ -191,6 +194,7 @@ add_executable(preprocessor_tests
     tests/test_file_watcher.cpp
     # Phase 1 tests:
     tests/test_bm25_index.cpp
+    tests/test_retrieval_query.cpp
     tests/test_hybrid_retriever.cpp
     tests/test_prompt_cache.cpp
     tests/test_proxy_metrics.cpp

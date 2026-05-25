@@ -1,4 +1,5 @@
 #include "graph_aware_retriever.hpp"
+#include "retrieval_query.hpp"
 #include "symbol_graph.hpp"
 
 #include <algorithm>
@@ -20,32 +21,22 @@ std::string lower(std::string s) {
     return s;
 }
 
-std::vector<std::string> query_terms(const std::string& query) {
-    std::vector<std::string> out;
-    std::string current;
-    auto flush = [&]() {
-        if (current.size() >= 3) out.push_back(std::move(current));
-        current.clear();
-    };
-
-    unsigned char prev = 0;
-    for (unsigned char c : query) {
-        if (!std::isalnum(c)) {
-            flush();
-            prev = 0;
-            continue;
+void append_unique(std::vector<std::string>& values,
+                   const std::vector<std::string>& additions) {
+    for (const auto& value : additions) {
+        if (std::find(values.begin(), values.end(), value) == values.end()) {
+            values.push_back(value);
         }
-
-        if (!current.empty() &&
-            std::isupper(c) &&
-            (std::islower(prev) || std::isdigit(prev))) {
-            flush();
-        }
-        current.push_back(static_cast<char>(std::tolower(c)));
-        prev = c;
     }
-    flush();
-    return out;
+}
+
+std::vector<std::string> ranking_terms_for_query(const std::string& query_text) {
+    const auto query = parse_retrieval_query(query_text);
+    std::vector<std::string> terms = query.terms;
+    append_unique(terms, query.identifier_terms);
+    append_unique(terms, query.path_hints);
+    append_unique(terms, query.language_hints);
+    return terms;
 }
 
 float kind_priority(SymbolKind kind) {
@@ -110,7 +101,7 @@ expand_with_graph(const std::vector<RetrievedChunk>& seeds,
         if (s.score < min_seed_score) min_seed_score = s.score;
     }
 
-    const auto terms = query_terms(cfg.query_text);
+    const auto terms = ranking_terms_for_query(cfg.query_text);
     auto candidates = graph.expansion_candidates(seed_ids);
     const float expand_score = min_seed_score * cfg.score_decay;
 

@@ -1,5 +1,6 @@
 #include "openai_proxy.hpp"
 
+#include "context_packer.hpp"
 #include "graph_aware_retriever.hpp"
 #include "intent_classifier.hpp"
 #include "llm_tokenizer.hpp"
@@ -18,7 +19,6 @@
 #include <cctype>
 #include <chrono>
 #include <cstring>
-#include <sstream>
 #include <stdexcept>
 
 #include <curl/curl.h>
@@ -380,28 +380,6 @@ std::string last_user_message(const json& messages) {
     return {};
 }
 
-/// Build a context system message from retrieved chunks, capped by total
-/// character budget. Earlier (higher-scoring) chunks win when the budget is
-/// tight.
-std::string build_context_block(const std::vector<RetrievedChunk>& chunks,
-                                std::size_t max_chars) {
-    std::ostringstream out;
-    out << "Retrieved code context (most relevant first):\n";
-    std::size_t used = 0;
-    for (const auto& rc : chunks) {
-        std::ostringstream entry;
-        entry << "\n--- " << rc.chunk.file_path
-              << " [L" << rc.chunk.start_line << "-L" << rc.chunk.end_line << "]";
-        if (!rc.chunk.symbol.empty()) entry << " " << rc.chunk.symbol;
-        entry << " ---\n" << rc.chunk.text << "\n";
-        const std::string s = entry.str();
-        if (max_chars > 0 && used + s.size() > max_chars) break;
-        out << s;
-        used += s.size();
-    }
-    return out.str();
-}
-
 } // namespace
 
 OpenAIProxy::OpenAIProxy(RepoIndex& index,
@@ -749,7 +727,10 @@ void OpenAIProxy::install_routes() {
             auto opt = optimiser_->optimise(user_msg, retrieved);
             sys_content = std::move(opt.system_message);
         } else if (!retrieved.empty()) {
-            sys_content = build_context_block(retrieved, max_context_chars);
+            ContextPackerConfig pack_cfg;
+            pack_cfg.max_context_chars = max_context_chars;
+            pack_cfg.include_header = true;
+            sys_content = pack_context(retrieved, pack_cfg).text;
         }
         if (rewriter_ && !sys_content.empty()) {
             try {
