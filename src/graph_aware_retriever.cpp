@@ -23,15 +23,28 @@ std::string lower(std::string s) {
 std::vector<std::string> query_terms(const std::string& query) {
     std::vector<std::string> out;
     std::string current;
-    for (unsigned char c : query) {
-        if (std::isalnum(c) || c == '_') {
-            current.push_back(static_cast<char>(std::tolower(c)));
-            continue;
-        }
+    auto flush = [&]() {
         if (current.size() >= 3) out.push_back(std::move(current));
         current.clear();
+    };
+
+    unsigned char prev = 0;
+    for (unsigned char c : query) {
+        if (!std::isalnum(c)) {
+            flush();
+            prev = 0;
+            continue;
+        }
+
+        if (!current.empty() &&
+            std::isupper(c) &&
+            (std::islower(prev) || std::isdigit(prev))) {
+            flush();
+        }
+        current.push_back(static_cast<char>(std::tolower(c)));
+        prev = c;
     }
-    if (current.size() >= 3) out.push_back(std::move(current));
+    flush();
     return out;
 }
 

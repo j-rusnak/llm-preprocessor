@@ -67,6 +67,29 @@ std::size_t read_size_t_field(const nlohmann::json& j,
     return static_cast<std::size_t>(raw);
 }
 
+long read_long_field(const nlohmann::json& j,
+                     const char* name,
+                     long fallback,
+                     long min_value) {
+    if (!j.contains(name)) return fallback;
+    if (!j[name].is_number_integer()) {
+        throw std::invalid_argument(std::string(name) + " must be an integer");
+    }
+    const auto raw = j[name].get<long long>();
+    if (raw < static_cast<long long>(min_value) ||
+        raw > static_cast<long long>(std::numeric_limits<long>::max())) {
+        throw std::invalid_argument(std::string(name) + " is out of range");
+    }
+    return static_cast<long>(raw);
+}
+
+bool contains_placeholder_proxy_token(const Config& config) {
+    return std::find(config.proxy_auth_bearer_tokens.begin(),
+                     config.proxy_auth_bearer_tokens.end(),
+                     "replace-with-local-proxy-token") !=
+           config.proxy_auth_bearer_tokens.end();
+}
+
 } // namespace
 
 Config ConfigLoader::load(const std::string& filepath) {
@@ -140,6 +163,21 @@ Config ConfigLoader::load(const std::string& filepath) {
     config.max_context_chars = j.value("max_context_chars", config.max_context_chars);
     config.upstream_url = j.value("upstream_url", config.upstream_url);
     config.upstream_api_key = j.value("upstream_api_key", config.upstream_api_key);
+    config.upstream_timeout_seconds =
+        read_long_field(j, "upstream_timeout_seconds",
+                        config.upstream_timeout_seconds, 1);
+    config.upstream_connect_timeout_seconds =
+        read_long_field(j, "upstream_connect_timeout_seconds",
+                        config.upstream_connect_timeout_seconds, 1);
+    config.upstream_max_response_bytes =
+        read_size_t_field(j, "upstream_max_response_bytes",
+                          config.upstream_max_response_bytes);
+    config.stream_idle_timeout_seconds =
+        read_long_field(j, "stream_idle_timeout_seconds",
+                        config.stream_idle_timeout_seconds, 0);
+    if (config.upstream_url.empty()) {
+        throw std::invalid_argument("upstream_url must not be empty");
+    }
 
     std::unordered_set<std::string> model_tier_names;
     if (j.contains("model_tiers")) {
@@ -270,6 +308,17 @@ Config ConfigLoader::load(const std::string& filepath) {
         !config.allow_unsafe_remote_proxy) {
         throw std::invalid_argument(
             "non-loopback proxy_host requires proxy auth or allow_unsafe_remote_proxy=true");
+    }
+    if (!is_loopback_host(config.proxy_host) &&
+        contains_placeholder_proxy_token(config)) {
+        throw std::invalid_argument(
+            "non-loopback proxy_host must not use placeholder proxy auth tokens");
+    }
+    if (!is_loopback_host(config.proxy_host) &&
+        config.proxy_max_request_bytes == 0 &&
+        !config.allow_unsafe_remote_proxy) {
+        throw std::invalid_argument(
+            "non-loopback proxy_host requires positive proxy_max_request_bytes or allow_unsafe_remote_proxy=true");
     }
 
     // --- Phase 2 fields (all optional). ---

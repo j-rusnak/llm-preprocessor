@@ -184,6 +184,34 @@ TEST(GraphAwareRetriever, QueryRelevantSymbolRanksFirst) {
               std::string::npos);
 }
 
+TEST(GraphAwareRetriever, CamelCaseQueryRanksSnakeCaseSymbol) {
+    auto index = make_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+
+    auto seed = chunk(30, "src/handler.cpp",
+        "void handle_request(){ parse_body(); audit_log(); verify_signature(); }\n");
+    auto parse = chunk(31, "src/body.cpp", "void parse_body(){}\n");
+    auto audit = chunk(32, "src/audit.cpp", "void audit_log(){}\n");
+    auto verify = chunk(33, "src/security.cpp", "void verify_signature(){}\n");
+
+    hydrate(*index, {parse, audit, verify});
+    graph.update_chunk(seed, extractor.extract(seed));
+    graph.update_chunk(parse, extractor.extract(parse));
+    graph.update_chunk(audit, extractor.extract(audit));
+    graph.update_chunk(verify, extractor.extract(verify));
+
+    preprocessor::GraphExpansionConfig cfg;
+    cfg.max_expanded = 3;
+    cfg.query_text = "signatureVerify";
+    auto expanded = preprocessor::expand_with_graph({{seed, 1.0f}},
+                                                    graph, *index, cfg);
+
+    ASSERT_GE(expanded.size(), 2u);
+    EXPECT_NE(expanded[1].chunk.text.find("verify_signature"),
+              std::string::npos);
+}
+
 TEST(GraphAwareRetriever, SuppressesDuplicateDefinitionsForSameSymbol) {
     auto index = make_index();
     preprocessor::SymbolGraph graph;

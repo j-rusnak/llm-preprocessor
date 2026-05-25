@@ -18,6 +18,11 @@ namespace preprocessor {
 ///   - cache_hits           : served from PromptCache
 ///   - upstream_calls       : forwarded to upstream LLM
 ///   - errors_total         : transport / parsing / upstream failures
+///   - auth_failures_total  : rejected local proxy auth attempts
+///   - rate_limit_denials_total : rejected local proxy rate-limit attempts
+///   - request_too_large_denials_total : rejected oversized chat requests
+///   - upstream_errors_total : upstream transport or response-limit failures
+///   - stream_cancellations_total : downstream client stream disconnects
 ///   - tokens_in_original   : token count of raw user prompt(s)
 ///   - tokens_in_compiled   : token count of payload actually sent upstream
 ///   - tokens_saved         : max(0, original - compiled). Approximates the
@@ -35,6 +40,21 @@ public:
     void on_cache_hit() { cache_hits.fetch_add(1, std::memory_order_relaxed); }
     void on_upstream_call() { upstream_calls.fetch_add(1, std::memory_order_relaxed); }
     void on_error() { errors_total.fetch_add(1, std::memory_order_relaxed); }
+    void on_auth_failure() {
+        auth_failures_total.fetch_add(1, std::memory_order_relaxed);
+    }
+    void on_rate_limit_denial() {
+        rate_limit_denials_total.fetch_add(1, std::memory_order_relaxed);
+    }
+    void on_request_too_large_denial() {
+        request_too_large_denials_total.fetch_add(1, std::memory_order_relaxed);
+    }
+    void on_upstream_error() {
+        upstream_errors_total.fetch_add(1, std::memory_order_relaxed);
+    }
+    void on_stream_cancellation() {
+        stream_cancellations_total.fetch_add(1, std::memory_order_relaxed);
+    }
 
     void observe_tokens(std::uint64_t original, std::uint64_t compiled) {
         tokens_in_original.fetch_add(original, std::memory_order_relaxed);
@@ -53,6 +73,11 @@ public:
     std::atomic<std::uint64_t> cache_hits{0};
     std::atomic<std::uint64_t> upstream_calls{0};
     std::atomic<std::uint64_t> errors_total{0};
+    std::atomic<std::uint64_t> auth_failures_total{0};
+    std::atomic<std::uint64_t> rate_limit_denials_total{0};
+    std::atomic<std::uint64_t> request_too_large_denials_total{0};
+    std::atomic<std::uint64_t> upstream_errors_total{0};
+    std::atomic<std::uint64_t> stream_cancellations_total{0};
     std::atomic<std::uint64_t> tokens_in_original{0};
     std::atomic<std::uint64_t> tokens_in_compiled{0};
     std::atomic<std::uint64_t> tokens_saved{0};

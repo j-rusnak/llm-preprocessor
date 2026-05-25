@@ -35,6 +35,10 @@ struct Config {
     std::size_t max_context_chars = 8000;
     std::string upstream_url = "https://api.openai.com/v1/chat/completions";
     std::string upstream_api_key;
+    long upstream_timeout_seconds = 60;
+    long upstream_connect_timeout_seconds = 10;
+    std::size_t upstream_max_response_bytes = 0;
+    long stream_idle_timeout_seconds = 0;
     std::vector<ModelTier> model_tiers;
     std::vector<ModelRoute> model_routes;
 

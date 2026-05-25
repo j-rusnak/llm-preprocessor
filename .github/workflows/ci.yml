@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "polish-features"]
+  pull_request:
+
+jobs:
+  windows:
+    name: Windows build and verification
+    runs-on: windows-latest
+
+    env:
+      ONNXRUNTIME_VERSION: "1.23.2"
+      BUILD_TYPE: Debug
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download ONNX Runtime
+        shell: pwsh
+        run: |
+          $version = $env:ONNXRUNTIME_VERSION
+          $name = "onnxruntime-win-x64-$version"
+          $zip = "$name.zip"
+          $url = "https://github.com/microsoft/onnxruntime/releases/download/v$version/$zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath .
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config $env:BUILD_TYPE --parallel
+
+      - name: Install smoke check
+        shell: pwsh
+        run: |
+          cmake --install build --config $env:BUILD_TYPE --prefix build/install-check
+          $required = @(
+            "build/install-check/bin/preprocessor_app.exe",
+            "build/install-check/bin/onnxruntime.dll",
+            "build/install-check/lib/cmake/LLMPreprocessor/LLMPreprocessorConfig.cmake",
+            "build/install-check/lib/cmake/LLMPreprocessor/LLMPreprocessorConfigVersion.cmake"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) {
+              throw "Missing installed artifact: $path"
+            }
+          }
+
+      - name: Unit tests
+        shell: pwsh
+        run: ctest --test-dir build -C $env:BUILD_TYPE --output-on-failure
+
+      - name: Smoke runner
+        shell: pwsh
+        run: .\build\$env:BUILD_TYPE\smoke_runner.exe
+
+      - name: Effectiveness runner
+        shell: pwsh
+        run: .\build\$env:BUILD_TYPE\effectiveness_runner.exe

@@ -75,6 +75,13 @@ std::string make_tmp_db(const std::string& tag) {
     return p.string();
 }
 
+fs::path repo_path(const std::string& relative_path) {
+    if (fs::exists(relative_path)) return fs::path(relative_path);
+    auto from_build_dir = fs::path("..") / relative_path;
+    if (fs::exists(from_build_dir)) return from_build_dir;
+    return fs::path(relative_path);
+}
+
 // A representative C++-flavoured retrieval snippet with comments + blanks +
 // duplicate lines that the heuristic compressor should remove.
 std::string sample_cpp_context() {
@@ -522,6 +529,85 @@ json measure_graph_retrieval() {
 }
 
 // --------------------------------------------------------------------------
+// Fixture retrieval: small real-world-shaped snapshots across languages.
+// --------------------------------------------------------------------------
+json measure_fixture_retrieval() {
+    const auto root = repo_path("tests/fixtures/retrieval");
+    if (!fs::exists(root)) {
+        throw std::runtime_error("retrieval fixture corpus missing: " + root.string());
+    }
+
+    auto index = make_retrieval_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+    index->attach_symbol_graph(&graph, &extractor);
+    index->index_path(root.string());
+
+    struct Case {
+        std::string language;
+        std::string query;
+        std::string expected_path_fragment;
+    };
+    const std::vector<Case> cases = {
+        {
+            "cpp",
+            "proxy stats auth failures stream cancellation upstream timeout",
+            "cpp/openai_proxy_slice.cpp"
+        },
+        {
+            "typescript",
+            "debounced search AbortController stale fetch results",
+            "typescript/searchPanel.ts"
+        },
+        {
+            "python",
+            "jsonl ingestion retry exponential backoff batch records",
+            "python/ingest_pipeline.py"
+        },
+        {
+            "markdown",
+            "production deployment loopback auth unsafe remote proxy request size",
+            "docs/production.md"
+        },
+    };
+
+    json by_language = json::object();
+    int top3 = 0;
+    double total_us = 0.0;
+    for (const auto& c : cases) {
+        auto t0 = Clock::now();
+        const auto hits = index->search(c.query, 3);
+        total_us += us_since(t0);
+
+        bool found = false;
+        json hit_files = json::array();
+        for (const auto& hit : hits) {
+            std::string path = hit.chunk.file_path;
+            std::replace(path.begin(), path.end(), '\\', '/');
+            hit_files.push_back(path);
+            if (path.find(c.expected_path_fragment) != std::string::npos) {
+                found = true;
+            }
+        }
+        if (found) ++top3;
+        by_language[c.language] = {
+            {"top3_hit", found},
+            {"expected", c.expected_path_fragment},
+            {"hits", hit_files},
+        };
+    }
+
+    return {
+        {"files", index->file_count()},
+        {"queries", cases.size()},
+        {"top3_correct", top3},
+        {"top3_pct", 100.0 * top3 / cases.size()},
+        {"avg_query_us", total_us / cases.size()},
+        {"by_language", by_language},
+    };
+}
+
+// --------------------------------------------------------------------------
 // ModelRouter: pick the right tier per (bucket, request size).
 // --------------------------------------------------------------------------
 json measure_model_router() {
@@ -717,6 +803,11 @@ void print_summary(const json& report) {
       <<" | unrelated pollution="
       <<(gr["unrelated_pollution"] ? "yes" : "no")<<"\n";
 
+    const auto& fr = report["fixture_retrieval"];
+    s << "[FixtureRetrieval]     "<<fr["files"]<<" files / "<<fr["queries"]
+      <<" queries | top-3 "<<pct(fr["top3_pct"])
+      <<" | "<<us(fr["avg_query_us"])<<"/query\n";
+
     const auto& mr = report["model_router"];
     s << "[ModelRouter]          "<<mr["correct"]<<"/"<<mr["cases"]
       <<" correct ("<<pct(mr["correct_pct"])<<") | "<<us(mr["avg_route_us"])<<"/route\n";
@@ -752,6 +843,7 @@ int main() {
         report["diff_patcher"]        = measure_diff_patcher();
         report["bm25_index"]          = measure_bm25();
         report["graph_retrieval"]     = measure_graph_retrieval();
+        report["fixture_retrieval"]   = measure_fixture_retrieval();
         report["model_router"]        = measure_model_router();
         report["ab_harness"]          = measure_ab_harness();
         report["auth_middleware"]     = measure_auth();

@@ -1,5 +1,38 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+
+find_dependency(nlohmann_json CONFIG)
+find_dependency(CURL)
+find_dependency(unofficial-sqlite3 CONFIG)
+find_dependency(hnswlib CONFIG)
+find_dependency(xxHash CONFIG)
+find_dependency(efsw CONFIG)
+find_dependency(httplib CONFIG)
+find_dependency(inja CONFIG)
+
+if(NOT TARGET onnxruntime)
+    add_library(onnxruntime SHARED IMPORTED)
+    set_target_properties(onnxruntime PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@/onnxruntime"
+    )
+
+    if(WIN32)
+        set_target_properties(onnxruntime PROPERTIES
+            IMPORTED_IMPLIB "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/onnxruntime.lib"
+            IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@/onnxruntime.dll"
+        )
+    elseif(APPLE)
+        set_target_properties(onnxruntime PROPERTIES
+            IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libonnxruntime.dylib"
+        )
+    else()
+        set_target_properties(onnxruntime PROPERTIES
+            IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libonnxruntime.so"
+        )
+    endif()
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/LLMPreprocessorTargets.cmake")
 
 check_required_components(LLMPreprocessor)

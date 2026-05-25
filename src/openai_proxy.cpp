@@ -31,28 +31,49 @@ namespace {
 
 using nlohmann::json;
 
-/// libcurl write callback that appends to a std::string.
-std::size_t curl_write_cb(char* ptr, std::size_t size, std::size_t nmemb, void* userdata) {
-    auto* out = static_cast<std::string*>(userdata);
-    out->append(ptr, size * nmemb);
-    return size * nmemb;
-}
-
 struct UpstreamResponse {
     long status = 0;
     std::string body;
     std::string content_type = "application/json";
 };
 
+struct BufferedResponseWriter {
+    UpstreamResponse* response = nullptr;
+    std::size_t max_bytes = 0;
+    bool exceeded = false;
+};
+
+/// libcurl write callback that appends to a response body with an optional cap.
+std::size_t curl_write_cb(char* ptr,
+                          std::size_t size,
+                          std::size_t nmemb,
+                          void* userdata) {
+    auto* writer = static_cast<BufferedResponseWriter*>(userdata);
+    const std::size_t bytes = size * nmemb;
+    if (!writer || !writer->response) return 0;
+    if (writer->max_bytes > 0 &&
+        writer->response->body.size() + bytes > writer->max_bytes) {
+        writer->exceeded = true;
+        return 0;
+    }
+    writer->response->body.append(ptr, bytes);
+    return bytes;
+}
+
 struct StreamingSink {
     httplib::DataSink* sink = nullptr;
+    bool cancelled = false;
 };
 
 std::size_t curl_stream_cb(char* ptr, std::size_t size, std::size_t nmemb, void* userdata) {
     auto* out = static_cast<StreamingSink*>(userdata);
     const std::size_t bytes = size * nmemb;
     if (!out || !out->sink) return 0;
-    return out->sink->write(ptr, bytes) ? bytes : 0;
+    if (!out->sink->write(ptr, bytes)) {
+        out->cancelled = true;
+        return 0;
+    }
+    return bytes;
 }
 
 std::string trim_header_value(std::string s) {
@@ -168,20 +189,28 @@ UpstreamResponse forward_upstream(const std::string& url,
                                   const std::string& body,
                                   const std::string& incoming_auth,
                                   const std::string& fallback_key,
-                                  long timeout_seconds) {
+                                  long timeout_seconds,
+                                  long connect_timeout_seconds,
+                                  std::size_t max_response_bytes) {
     CURL* curl = curl_easy_init();
     if (!curl) throw std::runtime_error("curl_easy_init failed");
 
     UpstreamResponse resp;
+    BufferedResponseWriter writer{&resp, max_response_bytes, false};
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &writer);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_cb);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
+    if (timeout_seconds > 0) {
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
+    }
+    if (connect_timeout_seconds > 0) {
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connect_timeout_seconds);
+    }
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
     struct curl_slist* headers = nullptr;
@@ -197,10 +226,12 @@ UpstreamResponse forward_upstream(const std::string& url,
 
     CURLcode rc = curl_easy_perform(curl);
     if (rc != CURLE_OK) {
-        std::string err = curl_easy_strerror(rc);
+        std::string err = writer.exceeded
+            ? "upstream response exceeds upstream_max_response_bytes"
+            : std::string("curl_easy_perform: ") + curl_easy_strerror(rc);
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
-        throw std::runtime_error("curl_easy_perform: " + err);
+        throw std::runtime_error(err);
     }
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status);
     curl_slist_free_all(headers);
@@ -264,6 +295,9 @@ bool stream_upstream(const std::string& url,
                      const std::string& incoming_auth,
                      const std::string& fallback_key,
                      long timeout_seconds,
+                     long connect_timeout_seconds,
+                     long idle_timeout_seconds,
+                     ProxyMetrics* metrics,
                      httplib::DataSink& sink) {
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -280,7 +314,16 @@ bool stream_upstream(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_stream_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &stream);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
+    if (timeout_seconds > 0) {
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
+    }
+    if (connect_timeout_seconds > 0) {
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connect_timeout_seconds);
+    }
+    if (idle_timeout_seconds > 0) {
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, idle_timeout_seconds);
+    }
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
     struct curl_slist* headers = nullptr;
@@ -296,13 +339,21 @@ bool stream_upstream(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
     CURLcode rc = curl_easy_perform(curl);
-    if (rc != CURLE_OK) {
+    if (rc != CURLE_OK && !stream.cancelled) {
+        if (metrics) {
+            metrics->on_upstream_error();
+        }
         write_sse_error(sink, std::string("upstream: ") + curl_easy_strerror(rc));
         write_sse_done(sink);
     }
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    sink.done();
+    if (stream.cancelled && metrics) {
+        metrics->on_stream_cancellation();
+    }
+    if (!stream.cancelled) {
+        sink.done();
+    }
     return true;
 }
 
@@ -541,6 +592,7 @@ void OpenAIProxy::install_routes() {
         if (config_.max_request_bytes > 0 &&
             req.body.size() > config_.max_request_bytes) {
             metrics_.on_error();
+            metrics_.on_request_too_large_denial();
             set_json_error(res, 413, "request_too_large",
                            "request body exceeds proxy_max_request_bytes");
             return;
@@ -554,6 +606,7 @@ void OpenAIProxy::install_routes() {
                 first_header(req, "X-Preprocessor-Timestamp", "X-Timestamp");
             if (!auth_.verify(auth_header, signature, timestamp, req.body)) {
                 metrics_.on_error();
+                metrics_.on_auth_failure();
                 set_json_error(res, 401, "unauthorized",
                                "missing or invalid proxy authentication");
                 return;
@@ -561,6 +614,7 @@ void OpenAIProxy::install_routes() {
         }
         if (rate_limiter_.enabled() && !rate_limiter_.try_acquire(rate_limit_key(req))) {
             metrics_.on_error();
+            metrics_.on_rate_limit_denial();
             set_json_error(res, 429, "rate_limited",
                            "proxy rate limit exceeded");
             return;
@@ -742,13 +796,20 @@ void OpenAIProxy::install_routes() {
             const auto target_url = upstream_url;
             const auto fallback_key = upstream_api_key;
             const auto timeout_seconds = config_.upstream_timeout_seconds;
+            const auto connect_timeout_seconds =
+                config_.upstream_connect_timeout_seconds;
+            const auto idle_timeout_seconds = config_.stream_idle_timeout_seconds;
+            auto* metrics = &metrics_;
             res.set_header("Cache-Control", "no-cache");
             res.set_chunked_content_provider(
                 "text/event-stream",
-                [target_url, compiled, incoming_auth, fallback_key, timeout_seconds]
+                [target_url, compiled, incoming_auth, fallback_key, timeout_seconds,
+                 connect_timeout_seconds, idle_timeout_seconds, metrics]
                 (std::size_t, httplib::DataSink& sink) {
                     return stream_upstream(target_url, compiled, incoming_auth,
-                                           fallback_key, timeout_seconds, sink);
+                                           fallback_key, timeout_seconds,
+                                           connect_timeout_seconds,
+                                           idle_timeout_seconds, metrics, sink);
                 });
             return;
         }
@@ -759,9 +820,12 @@ void OpenAIProxy::install_routes() {
             metrics_.on_upstream_call();
             up = forward_upstream(upstream_url, compiled, incoming_auth,
                                   upstream_api_key,
-                                  config_.upstream_timeout_seconds);
+                                  config_.upstream_timeout_seconds,
+                                  config_.upstream_connect_timeout_seconds,
+                                  config_.upstream_max_response_bytes);
         } catch (const std::exception& e) {
             metrics_.on_error();
+            metrics_.on_upstream_error();
             res.status = 502;
             res.set_content(json{{"error", std::string("upstream: ") + e.what()}}.dump(),
                             "application/json");

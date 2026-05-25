@@ -53,6 +53,13 @@ std::string tmp_db(const char* tag) {
     return p.string();
 }
 
+fs::path repo_path(const std::string& relative_path) {
+    if (fs::exists(relative_path)) return fs::path(relative_path);
+    auto from_build_dir = fs::path("..") / relative_path;
+    if (fs::exists(from_build_dir)) return from_build_dir;
+    return fs::path(relative_path);
+}
+
 // The same C++-like context used by effectiveness_runner so the gtest
 // thresholds and the benchmark numbers stay aligned.
 std::string sample_context() {
@@ -268,6 +275,58 @@ TEST(Effectiveness_BM25, RetrievesCorrectDocInTop3) {
     auto h2 = idx.search("HMAC authentication", 3);
     ASSERT_FALSE(h2.empty());
     EXPECT_EQ(h2[0].id, 4u);
+}
+
+TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
+    const auto root = repo_path("tests/fixtures/retrieval");
+    ASSERT_TRUE(fs::exists(root)) << root.string();
+
+    auto index = retrieval_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+    index->attach_symbol_graph(&graph, &extractor);
+    index->index_path(root.string());
+
+    ASSERT_GE(index->file_count(), 4u);
+
+    struct QueryCase {
+        std::string query;
+        std::string expected_path_fragment;
+    };
+    const std::vector<QueryCase> cases = {
+        {
+            "proxy stats auth failures stream cancellation upstream timeout",
+            "cpp/openai_proxy_slice.cpp"
+        },
+        {
+            "debounced search AbortController stale fetch results",
+            "typescript/searchPanel.ts"
+        },
+        {
+            "jsonl ingestion retry exponential backoff batch records",
+            "python/ingest_pipeline.py"
+        },
+        {
+            "production deployment loopback auth unsafe remote proxy request size",
+            "docs/production.md"
+        },
+    };
+
+    for (const auto& c : cases) {
+        const auto hits = index->search(c.query, 3);
+        ASSERT_FALSE(hits.empty()) << c.query;
+        bool found = false;
+        std::string files;
+        for (const auto& hit : hits) {
+            std::string path = hit.chunk.file_path;
+            std::replace(path.begin(), path.end(), '\\', '/');
+            files += path + "\n";
+            if (path.find(c.expected_path_fragment) != std::string::npos) {
+                found = true;
+            }
+        }
+        EXPECT_TRUE(found) << "query=" << c.query << "\nhits:\n" << files;
+    }
 }
 
 // ---------- Retrieval / Graph Expansion ----------
