@@ -11,7 +11,7 @@
 //   - EmbeddingCache:     persistent hit vs cold recompute speedup
 //   - DiffPatcher:        bytes-on-wire savings (diff vs whole-file)
 //   - BM25Index:          retrieval latency + top-k accuracy at scale
-//   - HybridRetriever-style fusion check (BM25 alone, qualitative)
+//   - GraphAwareRetriever: top-k lift + unrelated-query precision
 //   - ModelRouter:        routing decision correctness + latency
 //   - AbHarness:          sticky-hash distribution chi-square check
 //   - AuthMiddleware:     HMAC verify throughput
@@ -24,15 +24,21 @@
 #include "ab_harness.hpp"
 #include "auth_middleware.hpp"
 #include "bm25_index.hpp"
+#include "code_chunker.hpp"
 #include "diff_patcher.hpp"
 #include "embedding_cache.hpp"
+#include "graph_aware_retriever.hpp"
+#include "i_embedding_engine.hpp"
 #include "intent_classifier.hpp"
 #include "llm_tokenizer.hpp"
 #include "model_router.hpp"
 #include "prompt_cache.hpp"
 #include "prompt_rewriter.hpp"
 #include "rate_limiter.hpp"
+#include "repo_index.hpp"
 #include "streaming_compactor.hpp"
+#include "sync_endpoint.hpp"
+#include "symbol_graph.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -43,10 +49,12 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -136,6 +144,59 @@ std::vector<std::string> sample_doc_corpus() {
         "Auth middleware supports bearer token allow-lists and HMAC SHA-256 signatures.",
         "Rate limiter implements a per-key token-bucket throttle.",
     };
+}
+
+class RetrievalEmbedder : public preprocessor::IEmbeddingEngine {
+public:
+    explicit RetrievalEmbedder(std::size_t dim = 16) : dim_(dim) {}
+    std::vector<float> generate_embedding(const std::string& text) override {
+        std::vector<float> v(dim_, 0.0f);
+        std::size_t h = std::hash<std::string>{}(text);
+        for (std::size_t i = 0; i < dim_; ++i) {
+            v[i] = static_cast<float>(((h >> (i % 32)) & 0xff) / 255.0);
+        }
+        return v;
+    }
+private:
+    std::size_t dim_;
+};
+
+preprocessor::CodeChunk make_chunk(std::uint64_t id,
+                                   std::string file,
+                                   std::string text) {
+    preprocessor::CodeChunk c;
+    c.id = id;
+    c.file_path = std::move(file);
+    c.text = std::move(text);
+    c.start_line = 1;
+    c.end_line = 1;
+    return c;
+}
+
+std::unique_ptr<preprocessor::RepoIndex> make_retrieval_index() {
+    auto emb = std::make_shared<RetrievalEmbedder>(16);
+    auto chunker = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+    preprocessor::RepoIndexConfig cfg;
+    cfg.embedding_dim = 16;
+    cfg.watch_for_changes = false;
+    return std::make_unique<preprocessor::RepoIndex>(emb, chunker, cfg);
+}
+
+void hydrate_chunks(preprocessor::RepoIndex& index,
+                    const std::vector<preprocessor::CodeChunk>& chunks) {
+    std::vector<preprocessor::SyncVectorEntry> entries;
+    for (const auto& c : chunks) {
+        preprocessor::SyncVectorEntry entry;
+        entry.chunk_id = c.id;
+        entry.source_path = c.file_path;
+        entry.text = c.text;
+        entry.start_line = c.start_line;
+        entry.end_line = c.end_line;
+        entry.vec.assign(16, 0.0f);
+        entry.vec[static_cast<std::size_t>(c.id % 16)] = 1.0f;
+        entries.push_back(std::move(entry));
+    }
+    index.apply_synced_vectors(entries);
 }
 
 // --------------------------------------------------------------------------
@@ -399,6 +460,68 @@ json measure_bm25() {
 }
 
 // --------------------------------------------------------------------------
+// Graph-aware retrieval: top-k lift from reference->definition expansion and
+// precision guard against unrelated definitions.
+// --------------------------------------------------------------------------
+json measure_graph_retrieval() {
+    auto index = make_retrieval_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+
+    auto controller = make_chunk(
+        100, "src/controller.cpp",
+        "void handle_login(){ parse_body(); verify_signature(); }\n");
+    auto route = make_chunk(
+        101, "src/routes.cpp",
+        "void login_route(){ handle_login(); }\n");
+    auto verifier = make_chunk(
+        102, "src/security.cpp",
+        "void verify_signature(){ check_hmac(); }\n");
+    auto unrelated = make_chunk(
+        103, "src/payments.cpp",
+        "void charge_credit_card(){}\n");
+
+    hydrate_chunks(*index, {controller, route, verifier, unrelated});
+    for (const auto& c : {controller, route, verifier, unrelated}) {
+        graph.update_chunk(c, extractor.extract(c));
+    }
+
+    std::vector<preprocessor::RetrievedChunk> seeds{
+        {controller, 1.0f},
+        {route, 0.9f}
+    };
+    auto in_top = [](const std::vector<preprocessor::RetrievedChunk>& hits,
+                     const std::string& file,
+                     std::size_t top_n) {
+        const std::size_t limit = (std::min)(top_n, hits.size());
+        for (std::size_t i = 0; i < limit; ++i) {
+            if (hits[i].chunk.file_path.find(file) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    preprocessor::GraphExpansionConfig cfg;
+    cfg.max_expanded = 2;
+    cfg.query_text = "signature verification";
+    auto expanded = preprocessor::expand_with_graph(seeds, graph, *index, cfg);
+
+    const bool base_top3 = in_top(seeds, "security.cpp", 3);
+    const bool expanded_top3 = in_top(expanded, "security.cpp", 3);
+    const bool polluted = in_top(expanded, "payments.cpp", expanded.size());
+
+    return {
+        {"seed_count", seeds.size()},
+        {"expanded_count", expanded.size()},
+        {"base_top3_hit", base_top3},
+        {"expanded_top3_hit", expanded_top3},
+        {"top3_lift", expanded_top3 && !base_top3},
+        {"unrelated_pollution", polluted},
+    };
+}
+
+// --------------------------------------------------------------------------
 // ModelRouter: pick the right tier per (bucket, request size).
 // --------------------------------------------------------------------------
 json measure_model_router() {
@@ -587,6 +710,13 @@ void print_summary(const json& report) {
       <<" queries | top-1 "<<pct(bm["top1_pct"])<<" | top-3 "<<pct(bm["top3_pct"])
       <<" | "<<us(bm["avg_query_us"])<<"/query\n";
 
+    const auto& gr = report["graph_retrieval"];
+    s << "[GraphRetrieval]       seeds "<<gr["seed_count"]<<" -> "
+      <<gr["expanded_count"]<<" chunks | top-3 lift="
+      <<(gr["top3_lift"] ? "yes" : "no")
+      <<" | unrelated pollution="
+      <<(gr["unrelated_pollution"] ? "yes" : "no")<<"\n";
+
     const auto& mr = report["model_router"];
     s << "[ModelRouter]          "<<mr["correct"]<<"/"<<mr["cases"]
       <<" correct ("<<pct(mr["correct_pct"])<<") | "<<us(mr["avg_route_us"])<<"/route\n";
@@ -621,6 +751,7 @@ int main() {
         report["embedding_cache"]     = measure_embedding_cache();
         report["diff_patcher"]        = measure_diff_patcher();
         report["bm25_index"]          = measure_bm25();
+        report["graph_retrieval"]     = measure_graph_retrieval();
         report["model_router"]        = measure_model_router();
         report["ab_harness"]          = measure_ab_harness();
         report["auth_middleware"]     = measure_auth();

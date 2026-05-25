@@ -48,7 +48,7 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   tree-sitter slots in behind the same interface later), `RepoIndex`
   hooks (`attach_symbol_graph`, `try_get_chunk`, graph (re)population in
   `index_file_locked` / `forget_file_locked`), `expand_with_graph`
-  retrieval expander (decayed neighbour scores), `StructuralQueryEngine`
+  retrieval expander (query-aware ranked neighbour scores), `StructuralQueryEngine`
   zero-LLM fast path (definition / callers / functions-in-file / repo
   stats), `OpenAIProxy` wiring (`set_symbol_graph`,
   `set_structural_query_engine`; fast-path runs before retrieval, graph
@@ -149,14 +149,19 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   exported functions/classes, arrow function assignments, exported variables,
   and aliases qualified C++ method definitions by simple name for structural
   lookup and graph expansion.
+- **Graph retrieval ranking (DONE):** `expand_with_graph` accepts
+  `GraphExpansionConfig::query_text`, ranks expansion candidates by query match,
+  reference count, symbol kind, and deterministic file/id tie-breaks, and the
+  effectiveness harness reports graph top-3 lift plus unrelated pollution.
 - **Effectiveness harness (DONE):**
   `benchmarks/effectiveness_runner.cpp` standalone runner emits a
   JSON report (stdout) + human summary table (stderr) covering every
   Phase 5-12 module: cache hit rate / speedup, rewriter char+token
   reduction, streaming compactor budget compliance, embedding cache
-  speedup, diff transport savings, BM25 top-1/top-3 accuracy, model
-  router accuracy, A/B sticky+balance, HMAC verifies/sec, rate-limit
-  burst+refill. `tests/test_effectiveness.cpp` adds 12
+  speedup, diff transport savings, BM25 top-1/top-3 accuracy, graph
+  retrieval lift/pollution, model router accuracy, A/B sticky+balance,
+  HMAC verifies/sec, rate-limit
+  burst+refill. `tests/test_effectiveness.cpp` adds 14
   `Effectiveness_*` gtest cases that lock in conservative thresholds
   (cache ≥3x, rewriter ≥15% chars, BM25 100% on hand-built queries,
   A/B 50/50 ±5%, rate-limit burst exact). Full end-to-end testing &

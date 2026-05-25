@@ -73,9 +73,9 @@ purely structural questions without forwarding to the upstream LLM:
   interface (tree-sitter slots in behind this in a future phase) plus a
   regex-based default covering C/C++/Java/JS/Python/Rust/Go and C macros,
   with comment/string stripping and reserved-word filtering.
-- `GraphAwareRetriever::expand_with_graph` - appends graph-reachable
-  neighbour chunks (decayed score) to the hybrid retrieval result before
-  context assembly.
+- `GraphAwareRetriever::expand_with_graph` - ranks graph-reachable neighbour
+  chunks by query-symbol match, reference count, symbol kind, and deterministic
+  tie-breaks before context assembly.
 - `StructuralQueryEngine::try_answer` - zero-LLM fast path for queries
   like "where is `Foo`", "what calls `bar`", "functions in `file.cpp`",
   and "repo stats"; on a hit the proxy synthesises an OpenAI-compatible
@@ -211,7 +211,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **PromptTemplates** | `prompt_templates.hpp` | `inja`-rendered, per-bucket prompt scaffolds; JSON-overridable. |
 | **PromptOptimizer** | `prompt_optimizer.hpp` | Toggleable prompt rewriter wiring classifier + templates + project card. |
 | **SymbolGraph** | `symbol_graph.hpp` | Defs/refs store + `ISymbolExtractor` + `RegexSymbolExtractor`; one-hop neighbour expansion. |
-| **GraphAwareRetriever** | `graph_aware_retriever.hpp` | `expand_with_graph` appends graph-reachable neighbour chunks to retrieval results. |
+| **GraphAwareRetriever** | `graph_aware_retriever.hpp` | `expand_with_graph` adds ranked graph-reachable neighbour chunks to retrieval results. |
 | **StructuralQueryEngine** | `structural_query_engine.hpp` | Zero-LLM fast path for definition / caller / file-symbols / repo-stats queries. |
 | **McpServer** | `mcp_server.hpp` | JSON-RPC 2.0 MCP server over stdio; exposes RAG + structural surfaces as tools/resources. |
 | **PromptRewriter** | `prompt_rewriter.hpp` | `IPromptRewriter` + `HeuristicCompressionRewriter` (always on) and `LlamaCppRewriter` (stub; enabled by `LLM_PREPROCESSOR_WITH_LLAMA_CPP`). |
@@ -223,7 +223,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **StreamingCompactor** | `streaming_compactor.hpp` | Phase 11 rolling chat-history summarizer; keeps long sessions under the context window. |
 | **AuthMiddleware** | `auth_middleware.hpp` | Phase 12 bearer + HMAC-SHA256 request authentication. |
 | **RateLimiter** | `rate_limiter.hpp` | Phase 12 per-key token-bucket rate limiter. |
-| **EffectivenessRunner** | `benchmarks/effectiveness_runner.cpp` | Standalone harness that measures cache speedup, rewriter compression, BM25 accuracy, A/B determinism, HMAC throughput, and rate-limit burst behaviour. Emits JSON for CI dashboards. |
+| **EffectivenessRunner** | `benchmarks/effectiveness_runner.cpp` | Standalone harness that measures cache speedup, rewriter compression, BM25/graph retrieval quality, A/B determinism, HMAC throughput, and rate-limit burst behaviour. Emits JSON for CI dashboards. |
 
 ## Tech Stack
 

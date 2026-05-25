@@ -137,6 +137,7 @@ See section 4.
 | `EmbeddingCache` | round-trip latency, cold-vs-warm speedup |
 | `DiffPatcher` | bytes saved vs full-file transport, apply success |
 | `BM25Index` | top-1 / top-3 accuracy across hand-built queries, microseconds per query |
+| `GraphAwareRetriever` | top-3 lift from graph expansion, unrelated-definition pollution guard |
 | `ModelRouter` | routing accuracy on bucket+char-length test cases, microseconds per route |
 | `AbHarness` | sticky-assignment determinism (100/100), weighted balance (chi-squared) |
 | `AuthMiddleware` | HMAC verifies/second, microseconds per op |
@@ -159,6 +160,7 @@ Stderr prints a human-readable summary table:
 [EmbeddingCache]       500 vectors | speedup 9.0x (cold 188.39 us -> warm 20.95 us)
 [DiffPatcher]          5988 B full vs 176 B diff (97.1% saved) | applied=yes
 [BM25Index]            17 docs / 8 queries | top-1 100.0% | top-3 100.0% | 37.69 us/query
+[GraphRetrieval]       seeds 2 -> 3 chunks | top-3 lift=yes | unrelated pollution=no
 [ModelRouter]          4/4 correct (100.0%) | 0.57 us/route
 [AbHarness]            10000 assigns | A=2496 B=2502 C=5002 | chi^2=0.01 (crit 9.21) | sticky=100/100
 [AuthMiddleware]       50000 HMAC verifies | 11.14 us/op | 89802/s
@@ -177,6 +179,8 @@ Stderr prints a human-readable summary table:
   "embedding_cache":     { "vectors": 500, "cold_us": 188.4, "warm_us": 20.9, "speedup": 9.0 },
   "diff_patcher":        { "full_bytes": 5988, "diff_bytes": 176, "saved_pct": 0.971, "applied": true },
   "bm25":                { "docs": 17, "queries": 8, "top1": 1.0, "top3": 1.0, "us_per_query": 37.7 },
+  "graph_retrieval":     { "seed_count": 2, "expanded_count": 3,
+                           "top3_lift": true, "unrelated_pollution": false },
   "model_router":        { "cases": 4, "correct": 4, "accuracy": 1.0, "us_per_route": 0.57 },
   "ab_harness":          { "assigns": 10000, "counts": {"A":2496,"B":2502,"C":5002},
                            "chi_squared": 0.01, "sticky_ok": 100 },
@@ -199,6 +203,8 @@ The `Effectiveness_*` gtest cases lock in conservative floors:
 | `Effectiveness_EmbeddingCache.RoundTripsVectorsByModelId` | per-model isolation |
 | `Effectiveness_DiffPatcher.DiffIsSmallerThanFullFile` | diff < full content |
 | `Effectiveness_BM25.RetrievesCorrectDocInTop3` | top-1 correct on 2 queries |
+| `Effectiveness_Retrieval.GraphExpansionImprovesTop3` | graph expansion adds expected definition to top-3 |
+| `Effectiveness_Retrieval.GraphExpansionDoesNotPolluteUnrelatedTopK` | unrelated definitions are absent and seed order is preserved |
 | `Effectiveness_ModelRouter.PicksCheapForSmallEdits` | bucket + char-length routing |
 | `Effectiveness_AbHarness.IsSticky` | identical key → identical variant |
 | `Effectiveness_AbHarness.RoughlyBalancesWeights` | 50/50 within ±5% over 5000 |

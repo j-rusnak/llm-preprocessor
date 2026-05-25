@@ -3,6 +3,7 @@
 #include "repo_index.hpp"
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace preprocessor {
@@ -21,6 +22,19 @@ struct GraphExpansionConfig {
     /// Multiplier applied to the lowest seed score to derive the score of
     /// expanded chunks. Keeps them ranked below the originals.
     float score_decay = 0.5f;
+    /// Optional original user query. When present, candidates whose symbol,
+    /// file path, or chunk text matches query terms are promoted within the
+    /// expanded section.
+    std::string query_text;
+    /// Maximum definitions kept for the same referenced symbol. 0 disables.
+    std::size_t max_per_symbol = 1;
+    /// Maximum expanded chunks kept per file. 0 disables.
+    std::size_t max_per_file = 2;
+    /// Ranking weights for graph candidates. These only affect the order of
+    /// expanded chunks; seed chunks remain first.
+    float query_match_weight = 4.0f;
+    float reference_count_weight = 1.0f;
+    float kind_weight = 0.25f;
 };
 
 /// Expand `seeds` using `graph`, hydrating any new chunk ids via `index`.

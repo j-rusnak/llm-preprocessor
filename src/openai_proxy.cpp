@@ -674,7 +674,10 @@ void OpenAIProxy::install_routes() {
         // Phase 3: optional graph-aware expansion of retrieval results.
         if (symbol_graph_ && !retrieved.empty()) {
             try {
-                retrieved = expand_with_graph(retrieved, *symbol_graph_, index_);
+                GraphExpansionConfig graph_cfg;
+                graph_cfg.query_text = user_msg;
+                retrieved = expand_with_graph(retrieved, *symbol_graph_,
+                                              index_, graph_cfg);
             } catch (const std::exception&) {
                 // Expansion failures are non-fatal.
             }
