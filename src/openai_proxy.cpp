@@ -41,6 +41,7 @@ std::size_t curl_write_cb(char* ptr, std::size_t size, std::size_t nmemb, void* 
 struct UpstreamResponse {
     long status = 0;
     std::string body;
+    std::string content_type = "application/json";
 };
 
 struct StreamingSink {
@@ -52,6 +53,45 @@ std::size_t curl_stream_cb(char* ptr, std::size_t size, std::size_t nmemb, void*
     const std::size_t bytes = size * nmemb;
     if (!out || !out->sink) return 0;
     return out->sink->write(ptr, bytes) ? bytes : 0;
+}
+
+std::string trim_header_value(std::string s) {
+    while (!s.empty() && (s.back() == '\r' || s.back() == '\n' ||
+                          s.back() == ' ' || s.back() == '\t')) {
+        s.pop_back();
+    }
+    std::size_t first = 0;
+    while (first < s.size() && (s[first] == ' ' || s[first] == '\t')) {
+        ++first;
+    }
+    if (first > 0) s.erase(0, first);
+    return s;
+}
+
+std::size_t curl_header_cb(char* buffer,
+                           std::size_t size,
+                           std::size_t nitems,
+                           void* userdata) {
+    auto* resp = static_cast<UpstreamResponse*>(userdata);
+    const std::size_t bytes = size * nitems;
+    if (!resp) return bytes;
+
+    const std::string line(buffer, bytes);
+    const auto colon = line.find(':');
+    if (colon == std::string::npos) return bytes;
+
+    std::string name = line.substr(0, colon);
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    if (name == "content-type") {
+        resp->content_type = trim_header_value(line.substr(colon + 1));
+        if (resp->content_type.empty()) {
+            resp->content_type = "application/json";
+        }
+    }
+    return bytes;
 }
 
 void set_json_error(httplib::Response& res, int status,
@@ -139,6 +179,8 @@ UpstreamResponse forward_upstream(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
@@ -171,6 +213,11 @@ void write_sse_error(httplib::DataSink& sink, const std::string& message) {
         "event: error\n"
         "data: " + json{{"error", message}}.dump() + "\n\n";
     sink.write(event.data(), event.size());
+}
+
+void write_sse_done(httplib::DataSink& sink) {
+    const std::string done = "data: [DONE]\n\n";
+    sink.write(done.data(), done.size());
 }
 
 bool stream_synthetic_completion(const std::string& id,
@@ -221,6 +268,7 @@ bool stream_upstream(const std::string& url,
     CURL* curl = curl_easy_init();
     if (!curl) {
         write_sse_error(sink, "curl_easy_init failed");
+        write_sse_done(sink);
         sink.done();
         return true;
     }
@@ -250,6 +298,7 @@ bool stream_upstream(const std::string& url,
     CURLcode rc = curl_easy_perform(curl);
     if (rc != CURLE_OK) {
         write_sse_error(sink, std::string("upstream: ") + curl_easy_strerror(rc));
+        write_sse_done(sink);
     }
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
@@ -722,7 +771,7 @@ void OpenAIProxy::install_routes() {
             catch (...) { /* cache write failures are non-fatal */ }
         }
         res.status = static_cast<int>(up.status);
-        res.set_content(up.body, "application/json");
+        res.set_content(up.body, up.content_type.c_str());
     });
 }
 
