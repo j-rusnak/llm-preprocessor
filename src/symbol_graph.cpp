@@ -61,6 +61,14 @@ bool is_ident_char(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
 }
 
+std::string simple_symbol_name(const std::string& name) {
+    const auto scope = name.rfind("::");
+    if (scope != std::string::npos) return name.substr(scope + 2);
+    const auto dot = name.rfind('.');
+    if (dot != std::string::npos) return name.substr(dot + 1);
+    return name;
+}
+
 // Walk source counting lines so we can map a byte offset to a 1-based
 // line index.
 std::size_t line_at(const std::string& src, std::size_t pos) {
@@ -74,6 +82,11 @@ std::size_t line_at(const std::string& src, std::size_t pos) {
 void emit_def(ExtractedSymbols& out, const CodeChunk& chunk,
               const std::string& name, SymbolKind kind, std::size_t local_line) {
     if (name.empty() || reserved_words().count(name)) return;
+    if (kind == SymbolKind::Function &&
+        (name.find("::") != std::string::npos ||
+         name.find('.') != std::string::npos)) {
+        kind = SymbolKind::Method;
+    }
     SymbolDef d;
     d.name = name;
     d.kind = kind;
@@ -81,6 +94,17 @@ void emit_def(ExtractedSymbols& out, const CodeChunk& chunk,
     d.line = absolute_line(chunk, local_line);
     d.chunk_id = chunk.id;
     out.defs.push_back(std::move(d));
+
+    const std::string simple = simple_symbol_name(name);
+    if (simple != name && !simple.empty() && !reserved_words().count(simple)) {
+        SymbolDef alias;
+        alias.name = simple;
+        alias.kind = kind;
+        alias.file_path = chunk.file_path;
+        alias.line = absolute_line(chunk, local_line);
+        alias.chunk_id = chunk.id;
+        out.defs.push_back(std::move(alias));
+    }
 }
 
 void emit_ref(ExtractedSymbols& out, const CodeChunk& chunk,
@@ -164,6 +188,12 @@ ExtractedSymbols RegexSymbolExtractor::extract(const CodeChunk& chunk) const {
     // rust fn NAME / go func NAME
     static const std::regex kRustFn(R"(\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*[<\(])");
     static const std::regex kGoFunc(R"(\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\()");
+    // JS/TS arrow function assignment: const name = (...) =>
+    static const std::regex kJsArrow(
+        R"(\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*)\s*=>)");
+    // JS/TS variable export/assignment: export const name = ...
+    static const std::regex kJsVar(
+        R"(\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=)");
     // C macro
     static const std::regex kMacro(R"(^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*))");
 
@@ -183,6 +213,8 @@ ExtractedSymbols RegexSymbolExtractor::extract(const CodeChunk& chunk) const {
     scan(kPyCls, SymbolKind::Class, 1);
     scan(kRustFn, SymbolKind::Function, 1);
     scan(kGoFunc, SymbolKind::Function, 1);
+    scan(kJsArrow, SymbolKind::Function, 1);
+    scan(kJsVar, SymbolKind::Variable, 1);
     scan(kMacro, SymbolKind::Macro, 1);
 
     {
