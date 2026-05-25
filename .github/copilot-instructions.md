@@ -3,8 +3,7 @@ You are an expert C++ developer building a **plug-and-play middleware for AI cod
 assistants** (Cursor, Continue, Copilot, Claude Code, etc.). Your job is to write
 production-grade, low-latency C++ that intercepts prompts/completions, retrieves
 the smallest relevant slice of local code context, enforces token budgets, and
-forwards an optimised payload to the upstream LLM. The legacy command-routing path
-(local OS actions via semantic intent matching) is preserved as a side feature.
+forwards an optimised payload to the upstream LLM.
 
 # Project Context & Architecture
 - **Project Name:** LLM Preprocessor
@@ -12,17 +11,17 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   1. Reduce input/output tokens sent to upstream LLMs (cost).
   2. Reduce end-to-end latency (speed).
   3. Act as a smart local context engine (chunk + embed + index + retrieve).
-- **Core pipeline:** Intercept prompt -> Sanitize -> (optional) Intent route ->
-  Chunk + embed repo on first run / on file change -> ANN retrieve top-k chunks
-  -> Compile prompt within token budget -> Forward to LLM.
+- **Core pipeline:** Intercept OpenAI-compatible prompt -> chunk + embed repo
+  on first run / on file change -> retrieve top-k code chunks -> optimize and
+  budget the prompt -> forward to the upstream LLM or serve MCP context tools.
 - **Non-goals:** training models, hosting LLMs, IDE UI, language-server
   features. We *consume* clangd/LSPs in later phases; we never replace them.
 
 # Roadmap (kept here so multi-step work stays aligned)
 - **Phase 0 (DONE):** Foundation fixes - real ANN (`hnswlib`), content-addressed
   chunks (`xxhash`), filesystem watching (`efsw`), batched ONNX inference,
-  `MemoryEngine` split into `ChatHistoryStore` + `VectorStore`, downstream LLM
-  tokenizer interface, `IChunker` interface + `LineWindowChunker` fallback,
+  `VectorStore`, downstream LLM tokenizer interface, `IChunker` interface +
+  `LineWindowChunker` fallback,
   end-to-end smoke runner.
 - **Phase 1 (DONE):** MVP RAG proxy - `BraceAwareChunker` (AST-ish chunker;
   tree-sitter slots in behind the same `IChunker` later), `OpenAIProxy`
@@ -34,8 +33,8 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   mode in `main`. Dependency added: `cpp-httplib`.
 - **Phase 2 (DONE):** Project card + per-bucket prompt templates -
   `ProjectCard` + `ProjectCardBuilder` (extension histogram, top symbols,
-  README excerpt over `RepoIndex::snapshot_chunks`), `IIntentClassifier` +
-  `HeuristicIntentClassifier` (CodeEdit / CodeExplain / CodeGenerate /
+  README excerpt over `RepoIndex::snapshot_chunks`), coding-query bucket
+  classification via `IIntentClassifier` + `HeuristicIntentClassifier` (CodeEdit / CodeExplain / CodeGenerate /
   MetaQuery / Freeform), `PromptTemplates` (built-in scaffolds rendered
   via `inja`, JSON-overridable), `PromptOptimizer` (toggleable system-
   message rewriter wired into `OpenAIProxy::set_prompt_optimizer`), new
@@ -223,6 +222,6 @@ explicit request.
   changes) MUST update `README.md` and this file.
 - Streaming chat-completions requests (`"stream": true`) must preserve
   `text/event-stream` framing and must not read from or write to `PromptCache`.
-- Keep `main.cpp` thin - it only wires modules together and runs the loop.
+- Keep `main.cpp` thin - it only wires modules together and runs the selected runtime mode.
 - Latency is a feature. Prefer batched / mmap / zero-copy paths over clever
-  abstractions. Profile before optimising; benchmark via `benchmark_runner`.
+  abstractions. Profile before optimising; measure via `effectiveness_runner`.

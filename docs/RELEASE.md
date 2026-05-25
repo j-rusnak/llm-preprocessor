@@ -26,7 +26,7 @@ Runtime assets stay local or are downloaded in CI:
   - `onnxruntime-osx-universal2-1.23.2`
 - Embedding model files under `models/`, such as `model.ort` or `model.onnx`
   and `vocab.txt`.
-- Local SQLite files such as `history.db` and prompt/embedding caches.
+- Local SQLite files such as prompt, vector, and embedding caches.
 
 These paths are intentionally ignored by Git.
 

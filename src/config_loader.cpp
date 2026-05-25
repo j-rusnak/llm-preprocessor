@@ -90,6 +90,26 @@ bool contains_placeholder_proxy_token(const Config& config) {
            config.proxy_auth_bearer_tokens.end();
 }
 
+void reject_legacy_command_router_keys(const nlohmann::json& j) {
+    for (const char* key : {
+             "db_path",
+             "system_prompt",
+             "similarity_threshold",
+             "history_limit",
+             "intents",
+             "api_model",
+             "api_endpoint",
+             "temperature",
+             "max_tokens",
+         }) {
+        if (j.contains(key)) {
+            throw std::invalid_argument(
+                std::string("legacy command-router config key '") + key +
+                "' is no longer supported; use --serve/--mcp proxy settings instead");
+        }
+    }
+}
+
 } // namespace
 
 Config ConfigLoader::load(const std::string& filepath) {
@@ -105,52 +125,18 @@ Config ConfigLoader::load(const std::string& filepath) {
         throw std::runtime_error(std::string("Invalid JSON in config file: ") + e.what());
     }
 
+    reject_legacy_command_router_keys(j);
+
     Config config;
 
     config.model_path = j.value("model_path", "models/model.onnx");
     config.vocab_path = j.value("vocab_path", "models/vocab.txt");
-    config.db_path = j.value("db_path", "history.db");
-    config.system_prompt = j.value("system_prompt", "You are a helpful AI assistant.");
-    config.similarity_threshold = j.value("similarity_threshold", 0.65f);
-    config.history_limit = j.value("history_limit", 10);
 
     if (config.model_path.empty()) {
         throw std::invalid_argument("model_path must not be empty");
     }
     if (config.vocab_path.empty()) {
         throw std::invalid_argument("vocab_path must not be empty");
-    }
-    if (config.db_path.empty()) {
-        throw std::invalid_argument("db_path must not be empty");
-    }
-
-    if (config.similarity_threshold < 0.0f || config.similarity_threshold > 1.0f) {
-        throw std::invalid_argument("similarity_threshold must be between 0.0 and 1.0");
-    }
-    if (config.history_limit < 1) {
-        throw std::invalid_argument("history_limit must be at least 1");
-    }
-
-    // Optional API parameters (for complete payload mode).
-    if (j.contains("api_model") && j["api_model"].is_string()) {
-        config.api_model = j["api_model"].get<std::string>();
-    }
-    if (j.contains("api_endpoint") && j["api_endpoint"].is_string()) {
-        config.api_endpoint = j["api_endpoint"].get<std::string>();
-    }
-    if (j.contains("temperature") && j["temperature"].is_number()) {
-        float t = j["temperature"].get<float>();
-        if (t < 0.0f || t > 2.0f) {
-            throw std::invalid_argument("temperature must be between 0.0 and 2.0");
-        }
-        config.temperature = t;
-    }
-    if (j.contains("max_tokens") && j["max_tokens"].is_number_integer()) {
-        int mt = j["max_tokens"].get<int>();
-        if (mt < 1) {
-            throw std::invalid_argument("max_tokens must be at least 1");
-        }
-        config.max_tokens = mt;
     }
 
     // --- Phase 1 fields (all optional). ---
@@ -345,33 +331,6 @@ Config ConfigLoader::load(const std::string& filepath) {
     config.prompt_rewriter_max_chars = j.value("prompt_rewriter_max_chars",
                                                config.prompt_rewriter_max_chars);
     config.llama_model_path = j.value("llama_model_path", config.llama_model_path);
-
-    if (j.contains("intents") && j["intents"].is_array()) {
-        for (const auto& intent : j["intents"]) {
-            if (!intent.contains("name")) {
-                throw std::invalid_argument("Each intent must have a 'name' field");
-            }
-
-            std::string name = intent["name"].get<std::string>();
-            std::vector<std::string> examples;
-
-            if (intent.contains("examples") && intent["examples"].is_array()) {
-                for (const auto& ex : intent["examples"]) {
-                    examples.push_back(ex.get<std::string>());
-                }
-            } else if (intent.contains("example")) {
-                examples.push_back(intent["example"].get<std::string>());
-            } else {
-                throw std::invalid_argument("Each intent must have 'example' or 'examples' field");
-            }
-
-            if (examples.empty()) {
-                throw std::invalid_argument("Intent '" + name + "' must have at least one example");
-            }
-
-            config.intents.emplace_back(std::move(name), std::move(examples));
-        }
-    }
 
     return config;
 }

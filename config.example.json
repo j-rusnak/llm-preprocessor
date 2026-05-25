@@ -1,10 +1,6 @@
 {
   "model_path": "models/model.ort",
   "vocab_path": "models/vocab.txt",
-  "db_path": "history.db",
-  "system_prompt": "You are a helpful AI coding assistant. Answer concisely and ground changes in the repository context.",
-  "similarity_threshold": 0.65,
-  "history_limit": 10,
 
   "proxy_host": "127.0.0.1",
   "proxy_port": 8088,
@@ -42,7 +38,5 @@
   "prompt_rewriter_enabled": true,
   "prompt_rewriter_kind": "heuristic",
   "prompt_rewriter_max_chars": 8000,
-  "llama_model_path": "",
-
-  "intents": []
+  "llama_model_path": ""
 }

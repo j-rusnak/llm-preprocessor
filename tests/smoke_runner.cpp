@@ -1,8 +1,8 @@
-// Phase 0 end-to-end smoke runner.
+// End-to-end smoke runner for the coding-agent preprocessor pipeline.
 //
 // Drives every new module against an in-memory synthetic "repo" and prints
 // PASS/FAIL lines. This is the manual integration framework the user can run
-// to validate the full Phase 0 pipeline (chunk -> hash -> index -> retrieve
+// to validate the local middleware pipeline (chunk -> hash -> index -> retrieve
 // -> tokenize -> watch).
 //
 // It does NOT depend on the ONNX model — embeddings are simulated with a
@@ -13,7 +13,6 @@
 //   ./smoke_runner             # run all
 //   ./smoke_runner --verbose   # extra detail per stage
 
-#include "chat_history_store.hpp"
 #include "code_chunker.hpp"
 #include "file_watcher.hpp"
 #include "llm_tokenizer.hpp"
@@ -165,19 +164,6 @@ void stage_vector_index_and_search(Stats& s, bool verbose) {
     std::error_code ec;
     fs::remove(tmp, ec);
     (void)verbose;
-}
-
-void stage_history(Stats& s, bool) {
-    std::cout << "[chat_history_store]\n";
-    try {
-        preprocessor::ChatHistoryStore store(":memory:");
-        store.add_message("user", "fix the null deref");
-        store.add_message("assistant", "patched it");
-        auto h = store.get_recent_history(10);
-        report(s, "history round-trip", h.size() == 2 && h[1].second == "patched it");
-    } catch (const std::exception& e) {
-        report(s, "history round-trip", false, e.what());
-    }
 }
 
 void stage_tokenizer(Stats& s, bool) {
@@ -772,12 +758,11 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "=== LLM Preprocessor :: Phase 0-12 Smoke Runner ===\n\n";
+    std::cout << "=== LLM Preprocessor :: Middleware Smoke Runner ===\n\n";
 
     Stats s;
     stage_chunker(s, verbose);
     stage_vector_index_and_search(s, verbose);
-    stage_history(s, verbose);
     stage_tokenizer(s, verbose);
     stage_file_watcher(s, verbose);
     stage_bm25(s, verbose);
