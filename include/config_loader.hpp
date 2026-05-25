@@ -47,6 +47,7 @@ struct Config {
     std::size_t proxy_max_request_bytes = 8 * 1024 * 1024;
     std::size_t sync_cache_export_limit = 1000;
     std::size_t sync_vector_export_limit = 1000;
+    std::string tokenizer_mode = "heuristic";
     bool proxy_forward_client_authorization = true;
     bool allow_unsafe_remote_proxy = false;
 

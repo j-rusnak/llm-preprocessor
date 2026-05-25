@@ -117,7 +117,7 @@ struct ProxyHarness {
     preprocessor::RepoIndex index{embedder, chunker, idx_cfg};
     preprocessor::PromptCache cache{":memory:"};
     preprocessor::ProxyMetrics metrics;
-    preprocessor::HeuristicLLMTokenizer tokenizer;
+    preprocessor::ModelCalibratedLLMTokenizer tokenizer;
     std::unique_ptr<preprocessor::OpenAIProxy> proxy;
     int port = 0;
     std::thread thr;
@@ -367,7 +367,7 @@ TEST(OpenAIProxy, ModelRouterSelectsTierAndRewritesForwardedRequest) {
     router.add_tier({
         "frontier",
         "http://127.0.0.1:" + std::to_string(routed_upstream.port) + "/v1/chat/completions",
-        "gpt-frontier",
+        "gpt-4o-mini",
         "tier-token",
         0
     });
@@ -396,7 +396,12 @@ TEST(OpenAIProxy, ModelRouterSelectsTierAndRewritesForwardedRequest) {
     EXPECT_EQ(routed_upstream.last_authorization, "Bearer tier-token");
 
     auto forwarded = json::parse(routed_upstream.last_body);
-    EXPECT_EQ(forwarded["model"], "gpt-frontier");
+    EXPECT_EQ(forwarded["model"], "gpt-4o-mini");
+
+    auto stats = cli.Get("/stats");
+    ASSERT_TRUE(stats);
+    auto metrics = json::parse(stats->body);
+    ASSERT_TRUE(metrics["tokens_by_model_family"].contains("gpt-4o"));
 }
 
 TEST(OpenAIProxy, SyncCacheExportRequiresConfiguredAuth) {

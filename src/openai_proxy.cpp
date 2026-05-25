@@ -636,7 +636,8 @@ void OpenAIProxy::install_routes() {
         for (const auto& r : retrieved) chunk_ids.push_back(r.chunk.id);
 
         // Inject retrieved context as a system message.
-        const std::size_t original_tokens = tokenizer_.count_tokens(req.body);
+        const std::size_t original_tokens =
+            tokenizer_.count_tokens_for_model(effective_model, req.body);
         std::string sys_content;
         if (optimiser_) {
             auto opt = optimiser_->optimise(user_msg, retrieved);
@@ -673,8 +674,10 @@ void OpenAIProxy::install_routes() {
             }
         }
 
-        const std::size_t compiled_tokens = tokenizer_.count_tokens(compiled);
-        metrics_.observe_tokens(original_tokens, compiled_tokens);
+        const std::size_t compiled_tokens =
+            tokenizer_.count_tokens_for_model(effective_model, compiled);
+        metrics_.observe_tokens(tokenizer_.model_family(effective_model),
+                                original_tokens, compiled_tokens);
 
         std::string incoming_auth;
         if (config_.forward_client_authorization &&

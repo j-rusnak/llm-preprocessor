@@ -198,12 +198,12 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **VectorStore** | `vector_store.hpp` | Persistent HNSW ANN index keyed by 64-bit chunk IDs (xxhash). |
 | **CodeChunker** | `code_chunker.hpp` | `IChunker` interface + `LineWindowChunker` and `BraceAwareChunker`. |
 | **FileWatcher** | `file_watcher.hpp` | RAII wrapper around `efsw` for incremental re-indexing. |
-| **LLMTokenizer** | `llm_tokenizer.hpp` | Downstream-LLM token budgeter (`HeuristicLLMTokenizer` for now). |
+| **LLMTokenizer** | `llm_tokenizer.hpp` | Downstream-LLM token budgeter (`HeuristicLLMTokenizer` and model-family calibrated mode). |
 | **PromptCompiler** | `prompt_compiler.hpp` | Assembles the final OpenAI-style JSON payload. |
 | **BM25Index** | `bm25_index.hpp` | Okapi BM25 ranker with identifier-aware tokenisation. |
 | **HybridRetriever** | `hybrid_retriever.hpp` | RRF fusion of `VectorStore` + `BM25Index` hits. |
 | **PromptCache** | `prompt_cache.hpp` | SQLite-backed cache of upstream responses, keyed by `(model, compiled request, chunk_ids)`. |
-| **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, tokens saved. |
+| **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, tokens saved, and per-model-family token totals. |
 | **RepoIndex** | `repo_index.hpp` | End-to-end chunk + embed + index over a repo, kept fresh by `FileWatcher`. |
 | **OpenAIProxy** | `openai_proxy.hpp` | cpp-httplib server, OpenAI-compatible chat completions with RAG context injection. |
 | **ProjectCard** | `project_card.hpp` | Repository summary (extensions, top symbols, README excerpt) derived from `RepoIndex`. |
@@ -453,7 +453,8 @@ Endpoints:
   not cached.
 - `GET /healthz` - liveness check.
 - `GET /stats` - JSON snapshot of `ProxyMetrics` (tokens saved, cache hits,
-  upstream calls, errors). Protected by proxy auth when auth is configured.
+  upstream calls, errors, and per-model-family token totals). Protected by
+  proxy auth when auth is configured.
 - `GET /sync/cache` - export a `SyncBundle` containing recent cache entries.
   Protected by proxy auth when auth is configured.
 - `POST /sync/cache` - import cache entries from a peer `SyncBundle`.
@@ -476,6 +477,7 @@ Phase 1 config keys (in addition to the Phase 0 ones):
 | `max_context_chars` | Cap on injected context | `8000` |
 | `upstream_url` | OpenAI-compatible URL to forward to | `https://api.openai.com/v1/chat/completions` |
 | `upstream_api_key` | Fallback bearer token if the client did not send one | — |
+| `tokenizer_mode` | Token estimator for budgets and telemetry: `"heuristic"` or `"model-calibrated"` | `"heuristic"` |
 | `model_tiers` | Optional array of `{name, upstream_url, model_name, api_key, max_context}` tier definitions | `[]` |
 | `model_routes` | Optional ordered array of `{bucket, min_request_chars, max_request_chars, tier}` routing rules | `[]` |
 | `proxy_auth_bearer_tokens` | Local proxy bearer-token allow-list | `[]` |

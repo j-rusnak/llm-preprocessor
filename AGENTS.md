@@ -48,11 +48,11 @@ effectiveness before claiming completion.
 ## Current Production Priorities
 
 1. Clean tracked generated artifacts and package distribution.
-2. Improve retrieval quality with case-preserving structural queries, stronger
-   symbol extraction, and model-accurate token budgeting.
-3. Add protocol edge cases: streaming structural fast path, upstream error
-   propagation, and client disconnect handling.
-4. Add broader protocol hardening for upstream error mapping and disconnects.
+2. Improve retrieval quality with stronger symbol extraction and graph-aware
+   lookup quality.
+3. Add protocol edge cases: upstream error propagation and client disconnect
+   handling.
+4. Package distribution defaults and production config examples.
 
 ## Security Notes
 

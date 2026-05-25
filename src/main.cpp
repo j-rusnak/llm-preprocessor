@@ -36,6 +36,14 @@
 #endif
 static constexpr const char* VERSION = PREPROCESSOR_VERSION;
 
+static std::unique_ptr<preprocessor::ILLMTokenizer> make_llm_tokenizer(
+    const preprocessor::Config& config) {
+    if (config.tokenizer_mode == "model-calibrated") {
+        return std::make_unique<preprocessor::ModelCalibratedLLMTokenizer>();
+    }
+    return std::make_unique<preprocessor::HeuristicLLMTokenizer>();
+}
+
 static void print_help() {
     std::cout << "Usage: preprocessor_app [OPTIONS] [config_path]\n\n"
               << "Options:\n"
@@ -89,7 +97,7 @@ static int run_serve(const preprocessor::Config& config) {
 
     preprocessor::PromptCache cache(config.cache_db_path);
     preprocessor::ProxyMetrics metrics;
-    preprocessor::HeuristicLLMTokenizer llm_tokenizer;
+    auto llm_tokenizer = make_llm_tokenizer(config);
 
     preprocessor::OpenAIProxyConfig pcfg;
     pcfg.upstream_url = config.upstream_url;
@@ -123,7 +131,7 @@ static int run_serve(const preprocessor::Config& config) {
                   << config.model_routes.size() << " routes)\n";
     }
 
-    preprocessor::OpenAIProxy proxy(index, cache, metrics, llm_tokenizer, pcfg);
+    preprocessor::OpenAIProxy proxy(index, cache, metrics, *llm_tokenizer, pcfg);
 
     // Phase 2: optional prompt optimiser.
     std::unique_ptr<preprocessor::PromptOptimizer> optimiser;
@@ -315,7 +323,7 @@ int main(int argc, char* argv[]) {
 
         preprocessor::ChatHistoryStore history_store(config.db_path);
         preprocessor::PromptCompiler compiler(config.system_prompt);
-        preprocessor::HeuristicLLMTokenizer llm_tokenizer;
+        auto llm_tokenizer = make_llm_tokenizer(config);
 
         preprocessor::ApiParams api_params;
         api_params.model = config.api_model;
@@ -392,12 +400,17 @@ int main(int argc, char* argv[]) {
                 auto display = compiler.build_payload_json(user_input, retrieved_context, empty_history, api_params);
                 const std::string dumped = display.dump(4);
                 std::cout << "\n=== LLM Payload ===\n" << dumped << "\n";
-                std::cout << "[~tokens: " << llm_tokenizer.count_tokens(dumped) << "]\n";
+                std::cout << "[~tokens: "
+                          << llm_tokenizer->count_tokens_for_model(
+                                 api_params.model.value_or(std::string{}), dumped)
+                          << "]\n";
             } else {
                 std::vector<std::pair<std::string, std::string>> empty_history;
                 std::string display_payload = compiler.build_payload(user_input, retrieved_context, empty_history);
                 std::cout << "\n=== LLM Payload ===\n" << display_payload << "\n";
-                std::cout << "[~tokens: " << llm_tokenizer.count_tokens(display_payload) << "]\n";
+                std::cout << "[~tokens: "
+                          << llm_tokenizer->count_tokens(display_payload)
+                          << "]\n";
             }
             if (!history.empty()) {
                 std::cout << "(+ " << history.size() << " history messages included in payload)\n";

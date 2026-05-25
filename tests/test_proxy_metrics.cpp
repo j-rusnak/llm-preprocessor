@@ -35,3 +35,17 @@ TEST(ProxyMetrics, TokensSavedClampedToZero) {
     EXPECT_EQ(j["tokens_in_compiled"], 140u);
     EXPECT_EQ(j["tokens_saved"], 40u);
 }
+
+TEST(ProxyMetrics, TracksTokenTotalsByModelFamily) {
+    ProxyMetrics m;
+    m.observe_tokens("gpt-4o", 100, 80);
+    m.observe_tokens("gpt-4o", 20, 10);
+    m.observe_tokens("claude", 50, 60);
+
+    auto j = m.snapshot();
+    ASSERT_TRUE(j["tokens_by_model_family"].contains("gpt-4o"));
+    EXPECT_EQ(j["tokens_by_model_family"]["gpt-4o"]["original"], 120u);
+    EXPECT_EQ(j["tokens_by_model_family"]["gpt-4o"]["compiled"], 90u);
+    EXPECT_EQ(j["tokens_by_model_family"]["gpt-4o"]["saved"], 30u);
+    EXPECT_EQ(j["tokens_by_model_family"]["claude"]["saved"], 0u);
+}
