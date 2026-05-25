@@ -454,6 +454,7 @@ public liveness check. Non-loopback serving requires proxy auth unless
   "proxy_rate_limit_tokens_per_second": 2.0,
   "proxy_rate_limit_burst": 10.0,
   "proxy_max_request_bytes": 8388608,
+  "tokenizer_mode": "model-calibrated",
   "proxy_forward_client_authorization": false,
   "upstream_api_key": "provider-key"
 }
@@ -461,6 +462,10 @@ public liveness check. Non-loopback serving requires proxy auth unless
 
 Use `X-Preprocessor-Authorization: Bearer <token>` for local proxy auth when a
 client also needs to send a provider key in `Authorization`.
+
+`tokenizer_mode: "model-calibrated"` keeps request/compiled token estimates and
+`/stats.tokens_by_model_family` aligned with routed model families such as
+`gpt-4o`, `gpt-4.1`, Claude, and Gemini.
 
 ```powershell
 .\build\preprocessor_app.exe --health config.prod.json

@@ -2,7 +2,10 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <nlohmann/json_fwd.hpp>
+#include <string>
+#include <unordered_map>
 
 namespace preprocessor {
 
@@ -22,6 +25,12 @@ namespace preprocessor {
 ///                            chunk-selection vs naive forwarding.
 class ProxyMetrics {
 public:
+    struct TokenTotals {
+        std::uint64_t original = 0;
+        std::uint64_t compiled = 0;
+        std::uint64_t saved = 0;
+    };
+
     void on_request() { requests_total.fetch_add(1, std::memory_order_relaxed); }
     void on_cache_hit() { cache_hits.fetch_add(1, std::memory_order_relaxed); }
     void on_upstream_call() { upstream_calls.fetch_add(1, std::memory_order_relaxed); }
@@ -34,6 +43,10 @@ public:
         tokens_saved.fetch_add(saved, std::memory_order_relaxed);
     }
 
+    void observe_tokens(const std::string& model_family,
+                        std::uint64_t original,
+                        std::uint64_t compiled);
+
     nlohmann::json snapshot() const;
 
     std::atomic<std::uint64_t> requests_total{0};
@@ -43,6 +56,10 @@ public:
     std::atomic<std::uint64_t> tokens_in_original{0};
     std::atomic<std::uint64_t> tokens_in_compiled{0};
     std::atomic<std::uint64_t> tokens_saved{0};
+
+private:
+    mutable std::mutex token_family_mutex_;
+    std::unordered_map<std::string, TokenTotals> tokens_by_model_family_;
 };
 
 } // namespace preprocessor

@@ -140,6 +140,11 @@ forwards an optimised payload to the upstream LLM. The legacy command-routing pa
   `--serve`; `main.cpp` also has a `--health` flag that validates config +
   ONNX assets and exits non-zero on missing files. No new vcpkg deps. Full
   ctest and smoke suites pass.
+- **Runtime token budgeting (DONE):** `tokenizer_mode` selects
+  `HeuristicLLMTokenizer` or `ModelCalibratedLLMTokenizer`. The calibrated
+  mode buckets routed model names into coarse families (`gpt-4o`, `gpt-4.1`,
+  `gpt-5`, OpenAI reasoning, Claude, Gemini, default) and `ProxyMetrics`
+  exposes `/stats.tokens_by_model_family` with original/compiled/saved totals.
 - **Effectiveness harness (DONE):**
   `benchmarks/effectiveness_runner.cpp` standalone runner emits a
   JSON report (stdout) + human summary table (stderr) covering every

@@ -179,6 +179,7 @@ TEST_F(ConfigLoaderTest, LoadsProxySecuritySettings) {
         "proxy_max_request_bytes": 1048576,
         "sync_cache_export_limit": 25,
         "sync_vector_export_limit": 50,
+        "tokenizer_mode": "model-calibrated",
         "proxy_forward_client_authorization": false,
         "allow_unsafe_remote_proxy": false
     })");
@@ -194,6 +195,7 @@ TEST_F(ConfigLoaderTest, LoadsProxySecuritySettings) {
     EXPECT_EQ(config.proxy_max_request_bytes, 1048576u);
     EXPECT_EQ(config.sync_cache_export_limit, 25u);
     EXPECT_EQ(config.sync_vector_export_limit, 50u);
+    EXPECT_EQ(config.tokenizer_mode, "model-calibrated");
     EXPECT_FALSE(config.proxy_forward_client_authorization);
     EXPECT_FALSE(config.allow_unsafe_remote_proxy);
 }
@@ -230,6 +232,11 @@ TEST_F(ConfigLoaderTest, RejectsIncompleteRateLimitConfig) {
 
 TEST_F(ConfigLoaderTest, RejectsNegativeProxyMaxRequestBytes) {
     write_config(R"({"proxy_max_request_bytes": -1})");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsUnknownTokenizerMode) {
+    write_config(R"({"tokenizer_mode": "exact-magic"})");
     EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
 }
 

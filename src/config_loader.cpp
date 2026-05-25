@@ -233,6 +233,7 @@ Config ConfigLoader::load(const std::string& filepath) {
         read_size_t_field(j, "sync_cache_export_limit", config.sync_cache_export_limit);
     config.sync_vector_export_limit =
         read_size_t_field(j, "sync_vector_export_limit", config.sync_vector_export_limit);
+    config.tokenizer_mode = j.value("tokenizer_mode", config.tokenizer_mode);
     config.allow_unsafe_remote_proxy =
         j.value("allow_unsafe_remote_proxy", config.allow_unsafe_remote_proxy);
     if (j.contains("proxy_forward_client_authorization")) {
@@ -258,6 +259,11 @@ Config ConfigLoader::load(const std::string& filepath) {
     if (!rate_limit_disabled && !rate_limit_complete) {
         throw std::invalid_argument(
             "proxy_rate_limit_tokens_per_second and proxy_rate_limit_burst must both be > 0, or both 0");
+    }
+    if (config.tokenizer_mode != "heuristic" &&
+        config.tokenizer_mode != "model-calibrated") {
+        throw std::invalid_argument(
+            "tokenizer_mode must be 'heuristic' or 'model-calibrated'");
     }
     if (!is_loopback_host(config.proxy_host) &&
         !proxy_auth_enabled(config) &&

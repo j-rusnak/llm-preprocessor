@@ -40,3 +40,22 @@ TEST(HeuristicLLMTokenizerTest, NameStable) {
     preprocessor::HeuristicLLMTokenizer tk;
     EXPECT_EQ(tk.name(), "heuristic-v1");
 }
+
+TEST(ModelCalibratedLLMTokenizerTest, MapsKnownModelFamilies) {
+    preprocessor::ModelCalibratedLLMTokenizer tk;
+    EXPECT_EQ(tk.model_family("gpt-4o-mini"), "gpt-4o");
+    EXPECT_EQ(tk.model_family("gpt-4.1"), "gpt-4.1");
+    EXPECT_EQ(tk.model_family("claude-3-5-sonnet"), "claude");
+    EXPECT_EQ(tk.model_family("unknown-local-model"), "default");
+}
+
+TEST(ModelCalibratedLLMTokenizerTest, UsesFamilySpecificEstimates) {
+    preprocessor::ModelCalibratedLLMTokenizer tk;
+    std::string text;
+    for (int i = 0; i < 24; ++i) {
+        text +=
+            "This is a moderately long mixed code and prose prompt with symbols foo_bar(). ";
+    }
+    EXPECT_NE(tk.count_tokens_for_model("gpt-4o-mini", text),
+              tk.count_tokens_for_model("claude-3-5-sonnet", text));
+}

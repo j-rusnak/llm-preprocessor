@@ -21,6 +21,12 @@ public:
     /// Return the estimated token count for a single string.
     virtual std::size_t count_tokens(const std::string& text) const = 0;
 
+    /// Return the estimated token count using a model-specific calibration.
+    /// Implementations without model-specific data may fall back to
+    /// `count_tokens(text)`.
+    virtual std::size_t count_tokens_for_model(const std::string& model,
+                                               const std::string& text) const;
+
     /// Return the estimated token count for many strings (sum).
     virtual std::size_t count_tokens(const std::vector<std::string>& texts) const {
         std::size_t total = 0;
@@ -32,6 +38,9 @@ public:
 
     /// Identifier for the tokenizer family (used in cache keys).
     virtual std::string name() const = 0;
+
+    /// Coarse family bucket used for token telemetry.
+    virtual std::string model_family(const std::string& model) const;
 };
 
 /// Heuristic tokenizer: approximates GPT/Claude-style BPE token counts using
@@ -48,6 +57,21 @@ public:
 
 private:
     double chars_per_token_;
+};
+
+/// Model-calibrated estimator for OpenAI-compatible runtimes. This is still a
+/// lightweight estimator, not exact BPE tokenization, but it uses model-family
+/// calibration factors so token budgets and telemetry track routed models more
+/// closely than one global heuristic.
+class ModelCalibratedLLMTokenizer : public ILLMTokenizer {
+public:
+    ModelCalibratedLLMTokenizer() = default;
+
+    std::size_t count_tokens(const std::string& text) const override;
+    std::size_t count_tokens_for_model(const std::string& model,
+                                       const std::string& text) const override;
+    std::string name() const override { return "model-calibrated-v1"; }
+    std::string model_family(const std::string& model) const override;
 };
 
 } // namespace preprocessor
