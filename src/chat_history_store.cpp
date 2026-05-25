@@ -1,4 +1,4 @@
-#include "memory_engine.hpp"
+#include "chat_history_store.hpp"
 
 #include <stdexcept>
 #include <algorithm>
@@ -7,7 +7,7 @@
 
 namespace preprocessor {
 
-MemoryEngine::MemoryEngine(const std::string& db_path) {
+ChatHistoryStore::ChatHistoryStore(const std::string& db_path) {
     int rc = sqlite3_open(db_path.c_str(), &db_);
     if (rc != SQLITE_OK) {
         std::string err = sqlite3_errmsg(db_);
@@ -45,18 +45,18 @@ MemoryEngine::MemoryEngine(const std::string& db_path) {
     }
 }
 
-MemoryEngine::~MemoryEngine() {
+ChatHistoryStore::~ChatHistoryStore() {
     if (db_) {
         sqlite3_close(db_);
     }
 }
 
-MemoryEngine::MemoryEngine(MemoryEngine&& other) noexcept
+ChatHistoryStore::ChatHistoryStore(ChatHistoryStore&& other) noexcept
     : db_(other.db_) {
     other.db_ = nullptr;
 }
 
-MemoryEngine& MemoryEngine::operator=(MemoryEngine&& other) noexcept {
+ChatHistoryStore& ChatHistoryStore::operator=(ChatHistoryStore&& other) noexcept {
     if (this != &other) {
         if (db_) {
             sqlite3_close(db_);
@@ -67,7 +67,7 @@ MemoryEngine& MemoryEngine::operator=(MemoryEngine&& other) noexcept {
     return *this;
 }
 
-void MemoryEngine::add_message(const std::string& role, const std::string& content) {
+void ChatHistoryStore::add_message(const std::string& role, const std::string& content) {
     const char* sql = "INSERT INTO messages (role, content) VALUES (?, ?);";
 
     sqlite3_stmt* stmt = nullptr;
@@ -89,7 +89,7 @@ void MemoryEngine::add_message(const std::string& role, const std::string& conte
     }
 }
 
-std::vector<std::pair<std::string, std::string>> MemoryEngine::get_recent_history(int limit) {
+std::vector<std::pair<std::string, std::string>> ChatHistoryStore::get_recent_history(int limit) {
     const char* sql = "SELECT role, content FROM messages ORDER BY id DESC LIMIT ?;";
 
     sqlite3_stmt* stmt = nullptr;
@@ -121,7 +121,7 @@ std::vector<std::pair<std::string, std::string>> MemoryEngine::get_recent_histor
     return messages;
 }
 
-void MemoryEngine::update_last_message(const std::string& content) {
+void ChatHistoryStore::update_last_message(const std::string& content) {
     const char* sql =
         "UPDATE messages SET content = ? WHERE id = (SELECT MAX(id) FROM messages);";
 
@@ -148,7 +148,7 @@ void MemoryEngine::update_last_message(const std::string& content) {
     }
 }
 
-void MemoryEngine::clear_history() {
+void ChatHistoryStore::clear_history() {
     const char* sql = "DELETE FROM messages;";
     char* err_msg = nullptr;
     int rc = sqlite3_exec(db_, sql, nullptr, nullptr, &err_msg);
@@ -160,7 +160,7 @@ void MemoryEngine::clear_history() {
     }
 }
 
-void MemoryEngine::prune(int max_rows) {
+void ChatHistoryStore::prune(int max_rows) {
     if (max_rows < 1) {
         throw std::invalid_argument("prune: max_rows must be >= 1");
     }

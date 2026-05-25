@@ -1,6 +1,7 @@
 #include "embedding_engine.hpp"
 #include "tokenizer.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <numeric>
 #include <cmath>
@@ -40,37 +41,63 @@ EmbeddingEngine::EmbeddingEngine(const std::string& model_path,
 }
 
 std::vector<float> EmbeddingEngine::generate_embedding(const std::string& text) {
+    auto results = generate_embeddings(std::vector<std::string>{text});
+    return std::move(results.front());
+}
+
+std::vector<std::vector<float>>
+EmbeddingEngine::generate_embeddings(const std::vector<std::string>& texts) {
+    if (texts.empty()) {
+        return {};
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
     Ort::AllocatorWithDefaultOptions allocator;
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
-    // Tokenize the input text into token IDs via the Tokenizer.
-    std::vector<int64_t> input_ids = tokenizer_->encode(text);
-    auto sequence_length = static_cast<int64_t>(input_ids.size());
+    // --- Tokenize each input and find the max sequence length for padding. ---
+    const std::size_t batch = texts.size();
+    std::vector<std::vector<int64_t>> per_input_ids;
+    per_input_ids.reserve(batch);
 
-    // Build the attention mask: 1 for every real token.
-    std::vector<int64_t> attention_mask(static_cast<std::size_t>(sequence_length), 1);
+    std::size_t max_seq = 0;
+    for (const auto& t : texts) {
+        per_input_ids.push_back(tokenizer_->encode(t));
+        max_seq = std::max(max_seq, per_input_ids.back().size());
+    }
+    if (max_seq == 0) {
+        max_seq = 1; // avoid zero-sized tensors
+    }
 
-    // Token type IDs: all zeros for single-sequence input.
-    std::vector<int64_t> token_type_ids(static_cast<std::size_t>(sequence_length), 0);
+    // --- Build padded [batch, max_seq] tensors. ---
+    std::vector<int64_t> input_ids(batch * max_seq, 0);
+    std::vector<int64_t> attention_mask(batch * max_seq, 0);
+    std::vector<int64_t> token_type_ids(batch * max_seq, 0);
 
-    std::array<int64_t, 2> input_shape = {1, sequence_length};
+    for (std::size_t b = 0; b < batch; ++b) {
+        const auto& row = per_input_ids[b];
+        for (std::size_t t = 0; t < row.size(); ++t) {
+            input_ids[b * max_seq + t] = row[t];
+            attention_mask[b * max_seq + t] = 1;
+        }
+    }
+
+    std::array<int64_t, 2> input_shape = {
+        static_cast<int64_t>(batch), static_cast<int64_t>(max_seq)};
 
     std::vector<Ort::Value> input_tensors;
     input_tensors.push_back(Ort::Value::CreateTensor<int64_t>(
         memory_info, input_ids.data(), input_ids.size(),
         input_shape.data(), input_shape.size()));
-
     input_tensors.push_back(Ort::Value::CreateTensor<int64_t>(
         memory_info, attention_mask.data(), attention_mask.size(),
         input_shape.data(), input_shape.size()));
-
     input_tensors.push_back(Ort::Value::CreateTensor<int64_t>(
         memory_info, token_type_ids.data(), token_type_ids.size(),
         input_shape.data(), input_shape.size()));
 
-    // Query model for input/output node names dynamically
-    std::size_t num_inputs = session_->GetInputCount();
+    // --- Resolve input/output names dynamically. ---
+    const std::size_t num_inputs = session_->GetInputCount();
     std::vector<Ort::AllocatedStringPtr> input_name_ptrs;
     std::vector<const char*> input_names;
     for (std::size_t i = 0; i < num_inputs; ++i) {
@@ -91,48 +118,64 @@ std::vector<float> EmbeddingEngine::generate_embedding(const std::string& text) 
         throw std::runtime_error(std::string("ONNX inference failed: ") + e.what());
     }
 
-    // Extract the output embedding
-    // Output shape is typically [1, seq_len, hidden_dim]. Mean-pool over seq_len.
+    // --- Pool + normalise each row independently. ---
     auto& output_tensor = output_tensors.front();
     auto tensor_info = output_tensor.GetTensorTypeAndShapeInfo();
     auto shape = tensor_info.GetShape();
     const float* raw_output = output_tensor.GetTensorData<float>();
 
-    std::vector<float> embedding;
+    std::vector<std::vector<float>> results(batch);
+
     if (shape.size() == 3) {
-        // [batch=1, seq_len, hidden_dim] — attention-mask-aware mean pooling
-        auto seq_len = static_cast<std::size_t>(shape[1]);
-        auto hidden_dim = static_cast<std::size_t>(shape[2]);
-        embedding.resize(hidden_dim, 0.0f);
-        float mask_sum = 0.0f;
-        for (std::size_t t = 0; t < seq_len; ++t) {
-            float mask_val = static_cast<float>(attention_mask[t]);
-            mask_sum += mask_val;
-            for (std::size_t d = 0; d < hidden_dim; ++d) {
-                embedding[d] += raw_output[t * hidden_dim + d] * mask_val;
+        // [batch, seq_len, hidden_dim] — attention-mask-aware mean pooling.
+        const auto seq_len    = static_cast<std::size_t>(shape[1]);
+        const auto hidden_dim = static_cast<std::size_t>(shape[2]);
+
+        for (std::size_t b = 0; b < batch; ++b) {
+            std::vector<float> embedding(hidden_dim, 0.0f);
+            float mask_sum = 0.0f;
+            for (std::size_t t = 0; t < seq_len; ++t) {
+                const float m = static_cast<float>(attention_mask[b * max_seq + t]);
+                if (m == 0.0f) continue;
+                mask_sum += m;
+                const float* row = raw_output + (b * seq_len + t) * hidden_dim;
+                for (std::size_t d = 0; d < hidden_dim; ++d) {
+                    embedding[d] += row[d] * m;
+                }
             }
+            if (mask_sum > 0.0f) {
+                for (auto& v : embedding) v /= mask_sum;
+            }
+            const float mag = std::sqrt(
+                std::inner_product(embedding.begin(), embedding.end(),
+                                   embedding.begin(), 0.0f));
+            if (mag > 0.0f) {
+                for (auto& v : embedding) v /= mag;
+            }
+            results[b] = std::move(embedding);
         }
-        if (mask_sum > 0.0f) {
-            for (auto& val : embedding) {
-                val /= mask_sum;
+    } else if (shape.size() == 2) {
+        // [batch, hidden_dim] — model already pooled.
+        const auto hidden_dim = static_cast<std::size_t>(shape[1]);
+        for (std::size_t b = 0; b < batch; ++b) {
+            const float* row = raw_output + b * hidden_dim;
+            std::vector<float> embedding(row, row + hidden_dim);
+            const float mag = std::sqrt(
+                std::inner_product(embedding.begin(), embedding.end(),
+                                   embedding.begin(), 0.0f));
+            if (mag > 0.0f) {
+                for (auto& v : embedding) v /= mag;
             }
+            results[b] = std::move(embedding);
         }
     } else {
-        // [1, hidden_dim] or flat — use as-is
-        std::size_t total_elements = tensor_info.GetElementCount();
-        embedding.assign(raw_output, raw_output + total_elements);
+        throw std::runtime_error(
+            "EmbeddingEngine: unsupported output tensor rank " +
+            std::to_string(shape.size()));
     }
 
-    // L2-normalize the embedding vector
-    float magnitude = std::sqrt(
-        std::inner_product(embedding.begin(), embedding.end(), embedding.begin(), 0.0f));
-    if (magnitude > 0.0f) {
-        for (auto& val : embedding) {
-            val /= magnitude;
-        }
-    }
-
-    return embedding;
+    return results;
 }
 
 } // namespace preprocessor
+

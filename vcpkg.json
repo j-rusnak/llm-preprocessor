@@ -1,10 +1,16 @@
 {
   "name": "llm-preprocessor",
-  "version": "1.0.0",
-  "description": "A blazing fast C++ semantic router and preprocessor for LLMs.",
+  "version": "1.3.0",
+  "description": "C++17 RAG middleware and semantic context engine for AI coding assistants.",
   "dependencies": [
     "nlohmann-json",
     "curl",
-    "gtest"
+    "sqlite3",
+    "gtest",
+    "hnswlib",
+    "xxhash",
+    "efsw",
+    "cpp-httplib",
+    "inja"
   ]
 }

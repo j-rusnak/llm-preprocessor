@@ -25,7 +25,8 @@ static const std::unordered_set<std::string>& stop_words() {
         "must", "just", "also", "very", "really", "too", "quite",
         "hey", "hi", "hello", "yo", "oh", "ok", "okay", "please", "thanks",
         "yeah", "yep", "nah", "well", "like", "um", "uh",
-        "bro", "dude", "man", "buddy", "mate", "guys"
+        "bro", "dude", "man", "buddy", "mate", "guys", "shit", "ts", "fucking",
+        "goddamn", "damn"
     };
     return sw;
 }
@@ -80,10 +81,6 @@ std::optional<RouteResult> IntentRouter::route(const std::string& user_input) co
         return std::nullopt;
     }
 
-    // Cap on total ONNX inference calls in a single route() invocation.
-    static constexpr int max_inferences = 15;
-    int inference_count = 0;
-
     auto make_result = [&](const Intent* best, float score) -> std::optional<RouteResult> {
         if (best && score >= threshold_) {
             RouteResult result{best->name, score};
@@ -95,34 +92,39 @@ std::optional<RouteResult> IntentRouter::route(const std::string& user_input) co
         return std::nullopt;
     };
 
-    // --- Fast path: try the full input first. ---
+    auto best_against_intents = [&](const std::vector<float>& emb,
+                                    float& best_score,
+                                    const Intent*& best_intent) {
+        for (const auto& intent : intents_) {
+            const float score = cosine_similarity(emb, intent.embedding);
+            if (score > best_score) {
+                best_score = score;
+                best_intent = &intent;
+            }
+        }
+    };
+
+    // --- Fast path: try the full input first via a single inference. ---
     std::vector<float> input_embedding = engine_->generate_embedding(user_input);
-    ++inference_count;
 
     float best_score = -1.0f;
     const Intent* best_intent = nullptr;
-
-    for (const auto& intent : intents_) {
-        float score = cosine_similarity(input_embedding, intent.embedding);
-        if (score > best_score) {
-            best_score = score;
-            best_intent = &intent;
-        }
-    }
+    best_against_intents(input_embedding, best_score, best_intent);
 
     if (best_intent && best_score >= threshold_) {
         return make_result(best_intent, best_score);
     }
 
-    // --- Early exit: if the full input scores very low against all intents,
-    //     subphrase matching is unlikely to help. Skip the expensive sliding
-    //     window to avoid 8-10x latency for clearly non-matching inputs. ---
+    // Early exit when the full input is nowhere near any intent — subphrase
+    // matching is unlikely to recover from this.
     static constexpr float early_exit_ceiling = 0.35f;
     if (best_score < early_exit_ceiling) {
         return std::nullopt;
     }
 
-    // --- Sliding-window subphrase matching. ---
+    // --- Build every candidate subphrase up front and embed them in ONE
+    //     batched ONNX call. No per-call cap; ONNX Runtime handles batches
+    //     efficiently. ---
     std::vector<std::string> words;
     {
         std::istringstream iss(user_input);
@@ -132,59 +134,44 @@ std::optional<RouteResult> IntentRouter::route(const std::string& user_input) co
         }
     }
 
-    // Try the stop-word-filtered phrase first — often sufficient.
+    std::vector<std::string> candidates;
+
+    // Stop-word-filtered phrase (often the highest-signal candidate).
     auto content_words = remove_stop_words(words);
-    if (!content_words.empty() && content_words.size() < words.size() &&
-        inference_count < max_inferences) {
+    if (!content_words.empty() && content_words.size() < words.size()) {
         std::string filtered_phrase;
         for (const auto& w : content_words) {
             if (!filtered_phrase.empty()) filtered_phrase += ' ';
             filtered_phrase += w;
         }
+        candidates.push_back(std::move(filtered_phrase));
+    }
 
-        auto emb = engine_->generate_embedding(filtered_phrase);
-        ++inference_count;
-        for (const auto& intent : intents_) {
-            float score = cosine_similarity(emb, intent.embedding);
-            if (score > best_score) {
-                best_score = score;
-                best_intent = &intent;
+    // Sliding windows of length 1..min(5, n-1). For very short inputs the
+    // full-input pass already covered them.
+    if (words.size() > 2) {
+        const std::size_t max_window = std::min<std::size_t>(5, words.size() - 1);
+        for (std::size_t window_size = max_window; window_size >= 1; --window_size) {
+            for (std::size_t start = 0; start + window_size <= words.size(); ++start) {
+                std::string phrase;
+                for (std::size_t i = start; i < start + window_size; ++i) {
+                    if (!phrase.empty()) phrase += ' ';
+                    phrase += words[i];
+                }
+                candidates.push_back(std::move(phrase));
             }
-        }
-        if (best_score >= threshold_) {
-            return make_result(best_intent, best_score);
         }
     }
 
-    // For inputs of 1-2 words the full input already covered them.
-    if (words.size() <= 2) {
+    if (candidates.empty()) {
         return std::nullopt;
     }
 
-    // Try windows from largest to smallest.
-    const size_t max_window = std::min<size_t>(5, words.size() - 1);
-
-    for (size_t window_size = max_window; window_size >= 1 && inference_count < max_inferences; --window_size) {
-        for (size_t start = 0; start + window_size <= words.size() && inference_count < max_inferences; ++start) {
-            std::string phrase;
-            for (size_t i = start; i < start + window_size; ++i) {
-                if (!phrase.empty()) phrase += ' ';
-                phrase += words[i];
-            }
-
-            auto emb = engine_->generate_embedding(phrase);
-            ++inference_count;
-            for (const auto& intent : intents_) {
-                float score = cosine_similarity(emb, intent.embedding);
-                if (score > best_score) {
-                    best_score = score;
-                    best_intent = &intent;
-                }
-            }
-
-            if (best_score >= threshold_) {
-                return make_result(best_intent, best_score);
-            }
+    const auto sub_embeddings = engine_->generate_embeddings(candidates);
+    for (const auto& emb : sub_embeddings) {
+        best_against_intents(emb, best_score, best_intent);
+        if (best_score >= threshold_) {
+            return make_result(best_intent, best_score);
         }
     }
 
