@@ -370,7 +370,7 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
     index->attach_symbol_graph(&graph, &extractor);
     index->index_path(root.string());
 
-    ASSERT_GE(index->file_count(), 6u);
+    ASSERT_GE(index->file_count(), 11u);
 
     struct QueryCase {
         std::string query;
@@ -400,6 +400,26 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
         {
             "hmac bearer token x preprocessor authorization timestamp replay skew",
             "security/auth_middleware_slice.cpp"
+        },
+        {
+            "go http retry transport context deadline exponential backoff round trip",
+            "go/http_retry_transport.go"
+        },
+        {
+            "rust workspace cache lru snapshot eviction pathbuf",
+            "rust/workspace_cache.rs"
+        },
+        {
+            "java servlet auth filter hmac preprocessor authorization header",
+            "java/AuthFilter.java"
+        },
+        {
+            "yaml kubernetes deployment readiness probe auth token memory limit",
+            "yaml/kubernetes-deployment.yaml"
+        },
+        {
+            "sql prompt cache entries embedding vectors request audit schema",
+            "sql/schema.sql"
         },
     };
 

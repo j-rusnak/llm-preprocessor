@@ -11,6 +11,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 
@@ -90,6 +91,119 @@ TEST(RepoIndex, IndexAndSearch) {
     ASSERT_FALSE(hits.empty());
     // BM25 ensures the relevant chunk wins on identifier match.
     EXPECT_NE(hits[0].chunk.file_path.find("foo.cpp"), std::string::npos);
+}
+
+TEST(RepoIndex, FilePathAndSymbolMetadataAreSearchable) {
+    TempDir d;
+    d.write("src/security/hmac_verifier.cpp", R"(void run_check() {
+    return;
+}
+)");
+    d.write("src/ui/render_panel.cpp", R"(void render_panel() {
+    return;
+}
+)");
+
+    auto embedder = std::make_shared<MockEmbedder>(16);
+    auto chunker  = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+    preprocessor::RepoIndexConfig cfg;
+    cfg.embedding_dim = 16;
+    cfg.watch_for_changes = false;
+    preprocessor::RepoIndex idx(embedder, chunker, cfg);
+
+    idx.index_path(d.path().string());
+    auto path_hits = idx.search("src/security/hmac_verifier.cpp", 3);
+    ASSERT_FALSE(path_hits.empty());
+    EXPECT_NE(path_hits[0].chunk.file_path.find("hmac_verifier.cpp"), std::string::npos);
+
+    auto symbol_hits = idx.search("render_panel", 3);
+    ASSERT_FALSE(symbol_hits.empty());
+    EXPECT_NE(symbol_hits[0].chunk.file_path.find("render_panel.cpp"), std::string::npos);
+}
+
+TEST(RepoIndex, DefaultExtensionsIncludeInfraAndDataFiles) {
+    TempDir d;
+    d.write("deploy/kubernetes-deployment.yaml", R"(apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-preprocessor
+spec:
+  template:
+    spec:
+      containers:
+        - name: proxy
+          image: example/preprocessor:beta
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+)");
+    d.write("db/schema.sql", R"(CREATE TABLE prompt_cache_entries (
+  cache_key TEXT PRIMARY KEY,
+  model TEXT NOT NULL,
+  prompt_hash TEXT NOT NULL
+);
+
+CREATE INDEX idx_prompt_cache_model ON prompt_cache_entries(model);
+)");
+
+    auto embedder = std::make_shared<MockEmbedder>(16);
+    auto chunker  = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+    preprocessor::RepoIndexConfig cfg;
+    cfg.embedding_dim = 16;
+    cfg.watch_for_changes = false;
+    preprocessor::RepoIndex idx(embedder, chunker, cfg);
+
+    idx.index_path(d.path().string());
+    EXPECT_EQ(idx.file_count(), 2u);
+
+    auto yaml_hits = idx.search("yaml kubernetes readiness probe deployment", 3);
+    ASSERT_FALSE(yaml_hits.empty());
+    EXPECT_NE(yaml_hits[0].chunk.file_path.find("kubernetes-deployment.yaml"),
+              std::string::npos);
+
+    auto sql_hits = idx.search("sql prompt cache entries schema", 3);
+    ASSERT_FALSE(sql_hits.empty());
+    EXPECT_NE(sql_hits[0].chunk.file_path.find("schema.sql"), std::string::npos);
+}
+
+TEST(RepoIndex, SearchReturnsDistinctFilesBeforeRepeatingChunks) {
+    TempDir d;
+    d.write("src/large.cpp", R"(void first_primary_signal() {
+    primary_signal();
+}
+
+void second_primary_signal() {
+    primary_signal();
+}
+
+void third_primary_signal() {
+    primary_signal();
+}
+)");
+    d.write("src/target.cpp", R"(void secondary_signal() {
+    primary_signal();
+}
+)");
+
+    auto embedder = std::make_shared<MockEmbedder>(16);
+    auto chunker  = std::make_shared<preprocessor::BraceAwareChunker>(3, 1);
+    preprocessor::RepoIndexConfig cfg;
+    cfg.embedding_dim = 16;
+    cfg.watch_for_changes = false;
+    preprocessor::RepoIndex idx(embedder, chunker, cfg);
+
+    idx.index_path(d.path().string());
+    auto hits = idx.search("primary_signal secondary_signal", 2);
+    ASSERT_EQ(hits.size(), 2u);
+
+    std::unordered_set<std::string> files;
+    for (const auto& hit : hits) {
+        files.insert(fs::path(hit.chunk.file_path).filename().string());
+    }
+    EXPECT_EQ(files.size(), 2u);
+    EXPECT_TRUE(files.count("large.cpp"));
+    EXPECT_TRUE(files.count("target.cpp"));
 }
 
 TEST(RepoIndex, ReindexFileReplacesChunks) {

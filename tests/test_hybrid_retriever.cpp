@@ -78,6 +78,40 @@ TEST(HybridRetriever, KeywordSearchUsesNormalizedIdentifierTerms) {
     EXPECT_GT(hits[0].keyword_score, 0.0f);
 }
 
+TEST(HybridRetriever, ExactPathSignalsOutrankVectorNoise) {
+    VectorStore vec(4, 16, "", "cosine");
+    BM25Index bm;
+
+    vec.add(1, axis_vec(0));
+    bm.add(1, "src/security/hmac_verifier.cpp hmac verifier cpp");
+    vec.add(2, axis_vec(1));
+    bm.add(2, "unrelated render panel ui");
+
+    HybridRetriever h(vec, bm);
+
+    auto hits = h.search("src/security/hmac_verifier.cpp", axis_vec(1), 2);
+    ASSERT_FALSE(hits.empty());
+    EXPECT_EQ(hits[0].id, 1u);
+    EXPECT_GT(hits[0].keyword_score, 0.0f);
+}
+
+TEST(HybridRetriever, LanguageSignalsOutrankUnrelatedVectorNoise) {
+    VectorStore vec(4, 16, "", "cosine");
+    BM25Index bm;
+
+    vec.add(10, axis_vec(0));
+    bm.add(10, "sql schema prompt cache entries embedding vectors request audit");
+    vec.add(20, axis_vec(1));
+    bm.add(20, "java servlet auth filter hmac bearer");
+
+    HybridRetriever h(vec, bm);
+
+    auto hits = h.search("sql prompt cache entries schema", axis_vec(1), 2);
+    ASSERT_FALSE(hits.empty());
+    EXPECT_EQ(hits[0].id, 10u);
+    EXPECT_GT(hits[0].keyword_score, 0.0f);
+}
+
 TEST(HybridRetriever, RejectsZeroK) {
     VectorStore vec(4, 16);
     BM25Index bm;

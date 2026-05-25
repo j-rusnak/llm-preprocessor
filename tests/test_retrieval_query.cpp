@@ -53,8 +53,35 @@ TEST(RetrievalQuery, MapsNaturalLanguageLanguageHints) {
     EXPECT_TRUE(contains(query.language_hints, "typescript"));
     EXPECT_TRUE(contains(query.language_hints, "python"));
     EXPECT_TRUE(contains(query.language_hints, "markdown"));
+    EXPECT_TRUE(contains(query.language_hints, "json"));
     EXPECT_TRUE(contains(query.terms, "abort"));
     EXPECT_TRUE(contains(query.terms, "controller"));
+}
+
+TEST(RetrievalQuery, MapsInfraAndDataFileLanguageHints) {
+    const auto query = preprocessor::parse_retrieval_query(
+        "review deploy/kubernetes-deployment.yaml, db/schema.sql, Cargo.toml, "
+        "rust cache store and go http server");
+
+    EXPECT_TRUE(contains(query.path_hints, "deploy/kubernetes-deployment.yaml"));
+    EXPECT_TRUE(contains(query.path_hints, "db/schema.sql"));
+    EXPECT_TRUE(contains(query.path_hints, "cargo.toml"));
+    EXPECT_TRUE(contains(query.language_hints, "yaml"));
+    EXPECT_TRUE(contains(query.language_hints, "sql"));
+    EXPECT_TRUE(contains(query.language_hints, "toml"));
+    EXPECT_TRUE(contains(query.language_hints, "rust"));
+    EXPECT_TRUE(contains(query.language_hints, "go"));
+}
+
+TEST(RetrievalQuery, InfersLanguageFromSourcePathExtensions) {
+    const auto query = preprocessor::parse_retrieval_query(
+        "open src/server.go src/cache.rs src/AuthFilter.java src/App.kt src/Worker.cs");
+
+    EXPECT_TRUE(contains(query.language_hints, "go"));
+    EXPECT_TRUE(contains(query.language_hints, "rust"));
+    EXPECT_TRUE(contains(query.language_hints, "java"));
+    EXPECT_TRUE(contains(query.language_hints, "kotlin"));
+    EXPECT_TRUE(contains(query.language_hints, "csharp"));
 }
 
 TEST(RetrievalQuery, DedupesTermsWhilePreservingFirstOccurrence) {

@@ -658,6 +658,31 @@ json measure_fixture_retrieval() {
             "hmac bearer token x preprocessor authorization timestamp replay skew",
             "security/auth_middleware_slice.cpp"
         },
+        {
+            "go",
+            "go http retry transport context deadline exponential backoff round trip",
+            "go/http_retry_transport.go"
+        },
+        {
+            "rust",
+            "rust workspace cache lru snapshot eviction pathbuf",
+            "rust/workspace_cache.rs"
+        },
+        {
+            "java",
+            "java servlet auth filter hmac preprocessor authorization header",
+            "java/AuthFilter.java"
+        },
+        {
+            "yaml",
+            "yaml kubernetes deployment readiness probe auth token memory limit",
+            "yaml/kubernetes-deployment.yaml"
+        },
+        {
+            "sql",
+            "sql prompt cache entries embedding vectors request audit schema",
+            "sql/schema.sql"
+        },
     };
 
     json by_language = json::object();

@@ -37,7 +37,8 @@ struct RepoIndexConfig {
     std::vector<std::string> include_extensions = {
         ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
         ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java",
-        ".md", ".txt"
+        ".kt", ".cs", ".md", ".mdx", ".txt", ".json", ".jsonl",
+        ".yaml", ".yml", ".toml", ".cmake", ".sql"
     };
     /// Directory names to skip during the initial walk (in addition to any
     /// hidden directory starting with '.').

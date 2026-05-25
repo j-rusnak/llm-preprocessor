@@ -18,7 +18,7 @@ The product surface is intentionally narrow:
 | Area | What ships |
 |---|---|
 | Repository indexing | `RepoIndex` combines chunking, embeddings, HNSW vectors, BM25, file watching, and optional symbol graph population. |
-| Retrieval | `HybridRetriever` fuses vector and keyword hits; `GraphAwareRetriever` expands relevant symbol neighbours. |
+| Retrieval | `HybridRetriever` fuses vector and metadata-aware keyword hits; `RepoIndex` returns distinct files before repeated chunks; `GraphAwareRetriever` expands relevant symbol neighbours. |
 | Context packing | `ContextPacker` formats retrieved chunks with dedupe, diversity, omitted-chunk metadata, and stable cache keys. |
 | Prompt optimization | `PromptOptimizer` classifies coding turns into buckets, injects a project card, and renders per-bucket templates. |
 | Compression | `HeuristicCompressionRewriter` removes low-signal text and caps context before upstream forwarding. |
@@ -64,8 +64,8 @@ context and forwarded upstream.
 | `Tokenizer` / `EmbeddingEngine` | `tokenizer.hpp`, `embedding_engine.hpp` | WordPiece tokenization and ONNX embedding inference. |
 | `VectorStore` | `vector_store.hpp` | HNSW ANN index keyed by content-addressed chunk ids. |
 | `CodeChunker` | `code_chunker.hpp` | Line-window and brace-aware source chunkers. |
-| `RepoIndex` | `repo_index.hpp` | End-to-end repo indexing, search, metadata, and incremental updates. |
-| `BM25Index` / `HybridRetriever` | `bm25_index.hpp`, `hybrid_retriever.hpp` | Keyword ranking and RRF fusion with vector hits. |
+| `RepoIndex` | `repo_index.hpp` | End-to-end repo indexing, metadata-aware search, distinct-file ranking, and incremental updates. |
+| `BM25Index` / `HybridRetriever` | `bm25_index.hpp`, `hybrid_retriever.hpp` | Keyword ranking over code/path/language/symbol metadata and weighted RRF fusion with vector hits. |
 | `ContextPacker` | `context_packer.hpp` | Budget-aware retrieved-context formatting and telemetry. |
 | `PromptCache` | `prompt_cache.hpp` | SQLite cache of upstream responses keyed by model, request, and included chunks. |
 | `PromptOptimizer` | `prompt_optimizer.hpp` | Coding-prompt bucket classification, project-card injection, and template rendering. |

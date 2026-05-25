@@ -166,7 +166,7 @@ bool has_known_extension(const std::string& path) {
         ".c",   ".cc",   ".cpp", ".cxx", ".h",   ".hh",  ".hpp",
         ".hxx", ".js",   ".jsx", ".ts",  ".tsx", ".py",  ".rs",
         ".go",  ".java", ".kt",  ".cs",  ".md",  ".mdx", ".json",
-        ".jsonl", ".yaml", ".yml", ".toml", ".cmake", ".txt"
+        ".jsonl", ".yaml", ".yml", ".toml", ".cmake", ".sql", ".txt"
     };
     for (const char* ext : extensions) {
         const std::string suffix(ext);
@@ -199,6 +199,9 @@ void add_language_from_token(std::vector<std::string>& languages,
         add_unique(languages, "json");
     } else if (token == "yaml" || token == "yml") {
         add_unique(languages, "yaml");
+    } else if (token == "sql" || token == "postgres" ||
+               token == "postgresql" || token == "sqlite") {
+        add_unique(languages, "sql");
     } else if (token == "toml" || token == "cmake" || token == "rust" ||
                token == "go" || token == "java" || token == "kotlin" ||
                token == "csharp") {
@@ -242,6 +245,21 @@ void add_language_from_path(std::vector<std::string>& languages,
     } else if (path.size() >= 3 &&
                path.compare(path.size() - 3, 3, ".py") == 0) {
         add_unique(languages, "python");
+    } else if (path.size() >= 3 &&
+               path.compare(path.size() - 3, 3, ".rs") == 0) {
+        add_unique(languages, "rust");
+    } else if (path.size() >= 3 &&
+               path.compare(path.size() - 3, 3, ".go") == 0) {
+        add_unique(languages, "go");
+    } else if (path.size() >= 5 &&
+               path.compare(path.size() - 5, 5, ".java") == 0) {
+        add_unique(languages, "java");
+    } else if (path.size() >= 3 &&
+               path.compare(path.size() - 3, 3, ".kt") == 0) {
+        add_unique(languages, "kotlin");
+    } else if (path.size() >= 3 &&
+               path.compare(path.size() - 3, 3, ".cs") == 0) {
+        add_unique(languages, "csharp");
     } else if ((path.size() >= 3 &&
                 path.compare(path.size() - 3, 3, ".md") == 0) ||
                (path.size() >= 4 &&
@@ -260,6 +278,9 @@ void add_language_from_path(std::vector<std::string>& languages,
     } else if (path.size() >= 5 &&
                path.compare(path.size() - 5, 5, ".toml") == 0) {
         add_unique(languages, "toml");
+    } else if (path.size() >= 4 &&
+               path.compare(path.size() - 4, 4, ".sql") == 0) {
+        add_unique(languages, "sql");
     }
 }
 

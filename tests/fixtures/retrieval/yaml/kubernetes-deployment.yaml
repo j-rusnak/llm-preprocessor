@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-preprocessor
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-preprocessor
+  template:
+    metadata:
+      labels:
+        app: llm-preprocessor
+    spec:
+      containers:
+        - name: proxy
+          image: example/llm-preprocessor:beta
+          env:
+            - name: PREPROCESSOR_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: proxy-auth
+                  key: token
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi

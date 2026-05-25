@@ -161,7 +161,7 @@ deployment checklist.
 | `EmbeddingCache` | round-trip latency, cold-vs-warm speedup |
 | `DiffPatcher` | bytes saved vs full-file transport, apply success |
 | `BM25Index` | top-1 / top-3 accuracy across hand-built queries, microseconds per query |
-| `GraphAwareRetriever` | top-3 lift from graph expansion, unrelated-definition pollution guard, multi-language fixture top-3 checks |
+| `GraphAwareRetriever` / fixture retrieval | top-3 lift from graph expansion, unrelated-definition pollution guard, metadata-aware multi-language fixture top-3 checks |
 | `ModelRouter` | routing accuracy on bucket+char-length test cases, microseconds per route |
 | `AbHarness` | sticky-assignment determinism (100/100), weighted balance (chi-squared) |
 | `AuthMiddleware` | HMAC verifies/second, microseconds per op |
@@ -186,7 +186,7 @@ Stderr prints a human-readable summary table:
 [DiffPatcher]          5988 B full vs 176 B diff (97.1% saved) | applied=yes
 [BM25Index]            17 docs / 8 queries | top-1 100.0% | top-3 100.0% | 37.69 us/query
 [GraphRetrieval]       seeds 2 -> 3 chunks | top-3 lift=yes | unrelated pollution=no
-[FixtureRetrieval]     6 files / 6 queries | top-3 100.0% | 125.00 us/query
+[FixtureRetrieval]     11 files / 11 queries | top-3 100.0% | 660.00 us/query
 [ModelRouter]          4/4 correct (100.0%) | 0.57 us/route
 [AbHarness]            10000 assigns | A=2496 B=2502 C=5002 | chi^2=0.01 (crit 9.21) | sticky=100/100
 [AuthMiddleware]       50000 HMAC verifies | 11.14 us/op | 89802/s
@@ -210,8 +210,10 @@ Stderr prints a human-readable summary table:
   "bm25":                { "docs": 17, "queries": 8, "top1": 1.0, "top3": 1.0, "us_per_query": 37.7 },
   "graph_retrieval":     { "seed_count": 2, "expanded_count": 3,
                            "top3_lift": true, "unrelated_pollution": false },
-  "fixture_retrieval":   { "files": 6, "queries": 6, "top3_pct": 100.0,
-                           "by_language": {"cpp": {"top3_hit": true}} },
+  "fixture_retrieval":   { "files": 11, "queries": 11, "top3_pct": 100.0,
+                           "by_language": {"cpp": {"top3_hit": true},
+                                           "yaml": {"top3_hit": true},
+                                           "sql": {"top3_hit": true}} },
   "model_router":        { "cases": 4, "correct": 4, "accuracy": 1.0, "us_per_route": 0.57 },
   "ab_harness":          { "assigns": 10000, "counts": {"A":2496,"B":2502,"C":5002},
                            "chi_squared": 0.01, "sticky_ok": 100 },
@@ -236,7 +238,7 @@ The `Effectiveness_*` gtest cases lock in conservative floors:
 | `Effectiveness_EmbeddingCache.RoundTripsVectorsByModelId` | per-model isolation |
 | `Effectiveness_DiffPatcher.DiffIsSmallerThanFullFile` | diff < full content |
 | `Effectiveness_BM25.RetrievesCorrectDocInTop3` | top-1 correct on 2 queries |
-| `Effectiveness_Retrieval.FixtureQueriesHitExpectedLanguageFileTop3` | C++, TypeScript, Python, and Markdown fixture queries hit expected file in top-3 |
+| `Effectiveness_Retrieval.FixtureQueriesHitExpectedLanguageFileTop3` | C++, TypeScript, Python, Markdown, CMake, security, Go, Rust, Java, YAML, and SQL fixture queries hit expected file in top-3 |
 | `Effectiveness_Retrieval.GraphExpansionImprovesTop3` | graph expansion adds expected definition to top-3 |
 | `Effectiveness_Retrieval.GraphExpansionDoesNotPolluteUnrelatedTopK` | unrelated definitions are absent and seed order is preserved |
 | `Effectiveness_ModelRouter.PicksCheapForSmallEdits` | bucket + char-length routing |
@@ -388,7 +390,11 @@ auto hits = idx.search("HNSW nearest neighbour", /*k=*/3);
 // hits[0].id == 2
 ```
 
-`HybridRetriever` fuses ANN + BM25 hits via Reciprocal Rank Fusion (`k=60`).
+`HybridRetriever` fuses ANN + BM25 hits via weighted Reciprocal Rank Fusion
+(`k=60`). Path, identifier, and language-heavy coding-agent queries weight
+BM25 more strongly so exact file/symbol searches are not buried by dense-vector
+noise. `RepoIndex::search` oversamples candidates and returns distinct files
+before repeated chunks from the same file.
 
 ### 5.10 `ModelRouter` (Phase 8)
 
