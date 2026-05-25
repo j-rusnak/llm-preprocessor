@@ -392,6 +392,56 @@ SymbolGraph::neighbors_of(const std::vector<std::uint64_t>& seed_ids,
     return out;
 }
 
+std::vector<SymbolExpansionCandidate>
+SymbolGraph::expansion_candidates(
+    const std::vector<std::uint64_t>& seed_ids) const {
+    std::lock_guard<std::mutex> lock(mu_);
+
+    std::unordered_map<std::string, std::size_t> ref_counts;
+    std::unordered_map<std::string, std::size_t> best_seed_rank;
+    ref_counts.reserve(seed_ids.size() * 4);
+    best_seed_rank.reserve(seed_ids.size() * 4);
+
+    for (std::size_t rank = 0; rank < seed_ids.size(); ++rank) {
+        auto rit = refs_by_chunk_.find(seed_ids[rank]);
+        if (rit == refs_by_chunk_.end()) continue;
+        for (const auto& r : rit->second) {
+            ++ref_counts[r.name];
+            auto bit = best_seed_rank.find(r.name);
+            if (bit == best_seed_rank.end() || rank < bit->second) {
+                best_seed_rank[r.name] = rank;
+            }
+        }
+    }
+
+    std::vector<SymbolExpansionCandidate> out;
+    for (const auto& [name, count] : ref_counts) {
+        auto dit = defs_by_name_.find(name);
+        if (dit == defs_by_name_.end()) continue;
+        for (const auto& d : dit->second) {
+            out.push_back(SymbolExpansionCandidate{
+                d.chunk_id,
+                name,
+                d.kind,
+                count,
+                best_seed_rank[name]
+            });
+        }
+    }
+
+    std::sort(out.begin(), out.end(),
+              [](const SymbolExpansionCandidate& a,
+                 const SymbolExpansionCandidate& b) {
+                  if (a.best_seed_rank != b.best_seed_rank) {
+                      return a.best_seed_rank < b.best_seed_rank;
+                  }
+                  if (a.symbol != b.symbol) return a.symbol < b.symbol;
+                  if (a.chunk_id != b.chunk_id) return a.chunk_id < b.chunk_id;
+                  return static_cast<int>(a.kind) < static_cast<int>(b.kind);
+              });
+    return out;
+}
+
 std::vector<SymbolDef>
 SymbolGraph::defs_in_file(const std::string& file_path) const {
     std::lock_guard<std::mutex> lock(mu_);

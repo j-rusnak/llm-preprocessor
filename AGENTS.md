@@ -48,10 +48,20 @@ effectiveness before claiming completion.
 ## Current Production Priorities
 
 1. Clean tracked generated artifacts and package distribution.
-2. Improve graph-aware lookup quality with ranking and precision tuning.
+2. Broaden retrieval evaluation fixtures with real-world repo snapshots and
+   language-specific queries.
 3. Add deeper client disconnect cancellation tests for long-running upstream
    streams.
 4. Package distribution defaults and production config examples.
+
+## Retrieval Quality Notes
+
+- Graph expansion ranking is eval-backed. Add or update
+  `GraphAwareRetriever.*` and `Effectiveness_Retrieval.*` tests before tuning
+  ranking weights.
+- `OpenAIProxy` passes the normalized user message into
+  `GraphExpansionConfig::query_text`; keep that path intact for production
+  retrieval quality.
 
 ## Security Notes
 

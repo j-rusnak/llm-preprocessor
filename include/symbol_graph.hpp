@@ -44,6 +44,17 @@ struct SymbolRef {
     std::uint64_t chunk_id = 0;
 };
 
+/// One definition candidate reachable from a set of seed chunks through
+/// reference -> definition edges. Used by graph-aware retrieval to rank
+/// expansion chunks without exposing the graph's internal indexes.
+struct SymbolExpansionCandidate {
+    std::uint64_t chunk_id = 0;
+    std::string symbol;
+    SymbolKind kind = SymbolKind::Unknown;
+    std::size_t reference_count = 0;
+    std::size_t best_seed_rank = 0;
+};
+
 /// Result of running an extractor over a single chunk.
 struct ExtractedSymbols {
     std::vector<SymbolDef> defs;
@@ -115,6 +126,11 @@ public:
     std::vector<std::uint64_t>
     neighbors_of(const std::vector<std::uint64_t>& seed_ids,
                  std::size_t max_results = 8) const;
+
+    /// Ranked expansion candidates before chunk hydration. Returned order is
+    /// deterministic but final scoring belongs to graph-aware retrieval.
+    std::vector<SymbolExpansionCandidate>
+    expansion_candidates(const std::vector<std::uint64_t>& seed_ids) const;
 
     /// All definitions defined inside `file_path`.
     std::vector<SymbolDef> defs_in_file(const std::string& file_path) const;

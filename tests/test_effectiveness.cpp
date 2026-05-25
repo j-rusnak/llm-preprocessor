@@ -10,13 +10,19 @@
 #include "bm25_index.hpp"
 #include "diff_patcher.hpp"
 #include "embedding_cache.hpp"
+#include "code_chunker.hpp"
+#include "graph_aware_retriever.hpp"
+#include "i_embedding_engine.hpp"
 #include "intent_classifier.hpp"
 #include "llm_tokenizer.hpp"
 #include "model_router.hpp"
 #include "prompt_cache.hpp"
 #include "prompt_rewriter.hpp"
 #include "rate_limiter.hpp"
+#include "repo_index.hpp"
 #include "streaming_compactor.hpp"
+#include "sync_endpoint.hpp"
+#include "symbol_graph.hpp"
 
 #include <gtest/gtest.h>
 
@@ -24,6 +30,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -72,6 +79,60 @@ int product(int a, int b) {
 
 }  // namespace x
 )CPP";
+}
+
+class RetrievalEmbedder : public preprocessor::IEmbeddingEngine {
+public:
+    explicit RetrievalEmbedder(std::size_t dim = 16) : dim_(dim) {}
+    std::vector<float> generate_embedding(const std::string& text) override {
+        std::vector<float> v(dim_, 0.0f);
+        std::size_t h = std::hash<std::string>{}(text);
+        for (std::size_t i = 0; i < dim_; ++i) {
+            v[i] = static_cast<float>(((h >> (i % 32)) & 0xff) / 255.0);
+        }
+        return v;
+    }
+private:
+    std::size_t dim_;
+};
+
+preprocessor::CodeChunk retrieval_chunk(std::uint64_t id,
+                                        std::string file,
+                                        std::string text) {
+    preprocessor::CodeChunk c;
+    c.id = id;
+    c.file_path = std::move(file);
+    c.text = std::move(text);
+    c.start_line = 1;
+    c.end_line = 1;
+    return c;
+}
+
+std::unique_ptr<preprocessor::RepoIndex> retrieval_index() {
+    auto emb = std::make_shared<RetrievalEmbedder>(16);
+    auto chunker = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+    preprocessor::RepoIndexConfig cfg;
+    cfg.embedding_dim = 16;
+    cfg.watch_for_changes = false;
+    return std::make_unique<preprocessor::RepoIndex>(emb, chunker, cfg);
+}
+
+void hydrate_retrieval_chunks(
+    preprocessor::RepoIndex& index,
+    const std::vector<preprocessor::CodeChunk>& chunks) {
+    std::vector<preprocessor::SyncVectorEntry> entries;
+    for (const auto& c : chunks) {
+        preprocessor::SyncVectorEntry entry;
+        entry.chunk_id = c.id;
+        entry.source_path = c.file_path;
+        entry.text = c.text;
+        entry.start_line = c.start_line;
+        entry.end_line = c.end_line;
+        entry.vec.assign(16, 0.0f);
+        entry.vec[static_cast<std::size_t>(c.id % 16)] = 1.0f;
+        entries.push_back(std::move(entry));
+    }
+    index.apply_synced_vectors(entries);
 }
 
 }  // namespace
@@ -207,6 +268,92 @@ TEST(Effectiveness_BM25, RetrievesCorrectDocInTop3) {
     auto h2 = idx.search("HMAC authentication", 3);
     ASSERT_FALSE(h2.empty());
     EXPECT_EQ(h2[0].id, 4u);
+}
+
+// ---------- Retrieval / Graph Expansion ----------
+TEST(Effectiveness_Retrieval, GraphExpansionImprovesTop3) {
+    auto index = retrieval_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+
+    auto controller = retrieval_chunk(
+        100, "src/controller.cpp",
+        "void handle_login(){ parse_body(); verify_signature(); }\n");
+    auto route = retrieval_chunk(
+        101, "src/routes.cpp",
+        "void login_route(){ handle_login(); }\n");
+    auto verifier = retrieval_chunk(
+        102, "src/security.cpp",
+        "void verify_signature(){ check_hmac(); }\n");
+
+    hydrate_retrieval_chunks(*index, {controller, route, verifier});
+    graph.update_chunk(controller, extractor.extract(controller));
+    graph.update_chunk(route, extractor.extract(route));
+    graph.update_chunk(verifier, extractor.extract(verifier));
+
+    std::vector<preprocessor::RetrievedChunk> seeds{
+        {controller, 1.0f},
+        {route, 0.9f}
+    };
+    auto has_security = [](const std::vector<preprocessor::RetrievedChunk>& hits,
+                           std::size_t top_n) {
+        const std::size_t limit = (std::min)(top_n, hits.size());
+        for (std::size_t i = 0; i < limit; ++i) {
+            if (hits[i].chunk.file_path.find("security.cpp") != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    };
+    ASSERT_FALSE(has_security(seeds, 3));
+
+    preprocessor::GraphExpansionConfig cfg;
+    cfg.max_expanded = 1;
+    cfg.query_text = "signature verification";
+    auto expanded = preprocessor::expand_with_graph(seeds, graph, *index, cfg);
+
+    EXPECT_TRUE(has_security(expanded, 3));
+}
+
+TEST(Effectiveness_Retrieval, GraphExpansionDoesNotPolluteUnrelatedTopK) {
+    auto index = retrieval_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+
+    auto controller = retrieval_chunk(
+        110, "src/controller.cpp",
+        "void handle_profile(){ parse_profile(); }\n");
+    auto route = retrieval_chunk(
+        111, "src/routes.cpp",
+        "void profile_route(){ handle_profile(); }\n");
+    auto helper = retrieval_chunk(
+        112, "src/profile.cpp",
+        "void parse_profile(){}\n");
+    auto unrelated = retrieval_chunk(
+        113, "src/payments.cpp",
+        "void charge_credit_card(){}\n");
+
+    hydrate_retrieval_chunks(*index, {controller, route, helper, unrelated});
+    graph.update_chunk(controller, extractor.extract(controller));
+    graph.update_chunk(route, extractor.extract(route));
+    graph.update_chunk(helper, extractor.extract(helper));
+    graph.update_chunk(unrelated, extractor.extract(unrelated));
+
+    std::vector<preprocessor::RetrievedChunk> seeds{
+        {controller, 1.0f},
+        {route, 0.9f}
+    };
+    preprocessor::GraphExpansionConfig cfg;
+    cfg.max_expanded = 2;
+    cfg.query_text = "billing payment";
+    auto expanded = preprocessor::expand_with_graph(seeds, graph, *index, cfg);
+
+    ASSERT_GE(expanded.size(), seeds.size());
+    EXPECT_EQ(expanded[0].chunk.id, controller.id);
+    EXPECT_EQ(expanded[1].chunk.id, route.id);
+    for (const auto& hit : expanded) {
+        EXPECT_EQ(hit.chunk.file_path.find("payments.cpp"), std::string::npos);
+    }
 }
 
 // ---------- ModelRouter ----------
