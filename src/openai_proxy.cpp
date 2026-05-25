@@ -13,9 +13,9 @@
 #include "repo_index.hpp"
 #include "structural_query_engine.hpp"
 #include "symbol_graph.hpp"
-#include "text_sanitizer.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <sstream>
@@ -75,6 +75,25 @@ std::string rate_limit_key(const httplib::Request& req) {
     if (!auth.empty()) return "auth:" + auth;
     if (!req.remote_addr.empty()) return "ip:" + req.remote_addr;
     return "anonymous";
+}
+
+std::string normalize_user_message(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+    bool in_space = true;
+    for (unsigned char c : input) {
+        if (std::isspace(c)) {
+            if (!in_space) {
+                out.push_back(' ');
+                in_space = true;
+            }
+            continue;
+        }
+        out.push_back(static_cast<char>(c));
+        in_space = false;
+    }
+    if (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
 }
 
 bool enforce_proxy_controls(const httplib::Request& req,
@@ -465,7 +484,7 @@ void OpenAIProxy::install_routes() {
         }
 
         const bool stream = body.value("stream", false);
-        std::string user_msg = TextSanitizer::sanitize(last_user_message(body["messages"]));
+        std::string user_msg = normalize_user_message(last_user_message(body["messages"]));
         std::string effective_model = body.value("model", std::string{"unknown"});
         std::string upstream_url = config_.upstream_url;
         std::string upstream_api_key = config_.upstream_api_key;

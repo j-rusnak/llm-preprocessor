@@ -482,3 +482,45 @@ TEST(OpenAIProxy, StructuralFastPathHonorsStreamingSse) {
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
 }
+
+TEST(OpenAIProxy, StructuralFastPathPreservesCaseSensitiveSymbolNames) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+    h.index.attach_symbol_graph(&graph, &extractor);
+
+    const auto dir = std::filesystem::temp_directory_path() /
+        ("llm_pp_proxy_case_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "server.cpp")
+        << "class HTTPServer { public: void Listen(){} };\n";
+    h.index.index_path(dir.string());
+
+    preprocessor::StructuralQueryEngine structural(graph, h.index);
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions");
+    h.proxy->set_structural_query_engine(&structural);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"messages", json::array({{
+            {"role", "user"},
+            {"content", "Where is `HTTPServer` defined?"}
+        }})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+    EXPECT_EQ(up.calls.load(), 0);
+    auto parsed = json::parse(r->body);
+    const std::string content =
+        parsed["choices"][0]["message"]["content"].get<std::string>();
+    EXPECT_NE(content.find("`HTTPServer` is defined"), std::string::npos);
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
