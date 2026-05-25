@@ -46,6 +46,7 @@ struct Config {
     double proxy_rate_limit_burst = 0.0;
     std::size_t proxy_max_request_bytes = 8 * 1024 * 1024;
     std::size_t sync_cache_export_limit = 1000;
+    std::size_t sync_vector_export_limit = 1000;
     bool proxy_forward_client_authorization = true;
     bool allow_unsafe_remote_proxy = false;
 

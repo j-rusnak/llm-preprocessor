@@ -436,6 +436,56 @@ void OpenAIProxy::install_routes() {
         }
     });
 
+    server_->Get("/sync/vectors", [this](const httplib::Request& req,
+                                         httplib::Response& res) {
+        if (!enforce_proxy_controls(req, res, auth_, rate_limiter_, "")) {
+            return;
+        }
+
+        try {
+            SyncBundle bundle;
+            bundle.vectors =
+                index_.snapshot_vectors(config_.sync_vector_export_limit);
+            sync_.note_export();
+            res.set_content(sync_.to_json(bundle), "application/json");
+        } catch (const std::exception& e) {
+            set_json_error(res, 500, "sync_export_failed", e.what());
+        }
+    });
+
+    server_->Post("/sync/vectors", [this](const httplib::Request& req,
+                                          httplib::Response& res) {
+        if (config_.max_request_bytes > 0 &&
+            req.body.size() > config_.max_request_bytes) {
+            set_json_error(res, 413, "request_too_large",
+                           "request body exceeds proxy_max_request_bytes");
+            return;
+        }
+        if (!enforce_proxy_controls(req, res, auth_, rate_limiter_, req.body)) {
+            return;
+        }
+
+        auto parsed = json::parse(req.body, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object()) {
+            set_json_error(res, 400, "invalid_json",
+                           "sync bundle must be a JSON object");
+            return;
+        }
+
+        try {
+            SyncBundle bundle = sync_.from_json(req.body);
+            const std::size_t applied =
+                index_.apply_synced_vectors(bundle.vectors);
+            sync_.note_import();
+            res.set_content(
+                json{{"applied_vector_entries", applied},
+                     {"bundles_imported", sync_.bundles_imported()}}.dump(),
+                "application/json");
+        } catch (const std::exception& e) {
+            set_json_error(res, 400, "invalid_sync_bundle", e.what());
+        }
+    });
+
     server_->Post("/v1/chat/completions",
                   [this](const httplib::Request& req, httplib::Response& res) {
         metrics_.on_request();

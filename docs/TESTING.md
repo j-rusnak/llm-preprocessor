@@ -478,11 +478,11 @@ overrides before cache lookup and forwarding. Regression coverage lives in
 
 ### 6.3 Team mode (shared cache + vectors)
 
-`OpenAIProxy` exposes authenticated `GET /sync/cache` and `POST /sync/cache`
-routes around `SyncEndpoint`. These routes use the same bearer/HMAC middleware,
-rate limiter, and request-size guard as the proxy runtime. Vector bundle
-serialization remains library-level until `RepoIndex`/`VectorStore` exposes an
-enumerable vector snapshot.
+`OpenAIProxy` exposes authenticated `GET/POST /sync/cache` and
+`GET/POST /sync/vectors` routes around `SyncEndpoint`. These routes use the
+same bearer/HMAC middleware, rate limiter, and request-size guard as the proxy
+runtime. Vector bundles include embedding data plus chunk metadata so imports
+can hydrate the local retrieval index.
 
 ### 6.4 MCP for VS Code
 

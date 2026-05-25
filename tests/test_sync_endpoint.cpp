@@ -21,6 +21,10 @@ TEST(SyncEndpoint, RoundtripsJson) {
     v.chunk_id = 42;
     v.vec = {0.1f, 0.2f, 0.3f};
     v.source_path = "src/foo.cpp";
+    v.text = "void foo() {}";
+    v.start_line = 7;
+    v.end_line = 9;
+    v.symbol = "foo";
     b.vectors.push_back(v);
 
     auto j = s.to_json(b);
@@ -30,6 +34,11 @@ TEST(SyncEndpoint, RoundtripsJson) {
     ASSERT_EQ(round.vectors.size(), 1u);
     EXPECT_EQ(round.vectors[0].chunk_id, 42u);
     EXPECT_EQ(round.vectors[0].vec.size(), 3u);
+    EXPECT_EQ(round.vectors[0].source_path, "src/foo.cpp");
+    EXPECT_EQ(round.vectors[0].text, "void foo() {}");
+    EXPECT_EQ(round.vectors[0].start_line, 7u);
+    EXPECT_EQ(round.vectors[0].end_line, 9u);
+    EXPECT_EQ(round.vectors[0].symbol, "foo");
 }
 
 TEST(SyncEndpoint, AppliesBundleToPromptCache) {

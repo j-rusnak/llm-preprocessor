@@ -67,6 +67,9 @@ struct OpenAIProxyConfig {
 
     /// Maximum cache entries returned by GET /sync/cache. 0 = no limit.
     std::size_t sync_cache_export_limit = 1000;
+
+    /// Maximum vector entries returned by GET /sync/vectors. 0 = no limit.
+    std::size_t sync_vector_export_limit = 1000;
 };
 
 /// OpenAI-compatible HTTP proxy.

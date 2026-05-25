@@ -1,6 +1,7 @@
 #include "code_chunker.hpp"
 #include "i_embedding_engine.hpp"
 #include "repo_index.hpp"
+#include "sync_endpoint.hpp"
 
 #include <gtest/gtest.h>
 
@@ -168,4 +169,33 @@ TEST(RepoIndex, ForgetFileKeepsDuplicateContentFromOtherFiles) {
     auto hits = idx.search("shared_symbol", 3);
     ASSERT_FALSE(hits.empty());
     EXPECT_NE(hits[0].chunk.file_path.find("b.cpp"), std::string::npos);
+}
+
+TEST(RepoIndex, SnapshotsAndImportsVectorBundleEntries) {
+    TempDir d;
+    d.write("alpha.cpp", R"(void alpha_symbol() {
+    return;
+}
+)");
+
+    auto embedder = std::make_shared<MockEmbedder>(16);
+    auto chunker  = std::make_shared<preprocessor::BraceAwareChunker>(400, 1);
+    preprocessor::RepoIndexConfig cfg;
+    cfg.embedding_dim = 16;
+    cfg.watch_for_changes = false;
+
+    preprocessor::RepoIndex source(embedder, chunker, cfg);
+    source.index_path(d.path().string());
+    auto vectors = source.snapshot_vectors();
+    ASSERT_EQ(vectors.size(), 1u);
+    EXPECT_EQ(vectors[0].vec.size(), 16u);
+    EXPECT_NE(vectors[0].text.find("alpha_symbol"), std::string::npos);
+
+    preprocessor::RepoIndex imported(embedder, chunker, cfg);
+    EXPECT_EQ(imported.apply_synced_vectors(vectors), 1u);
+    EXPECT_EQ(imported.chunk_count(), 1u);
+
+    auto hits = imported.search("alpha_symbol", 3);
+    ASSERT_FALSE(hits.empty());
+    EXPECT_NE(hits[0].chunk.text.find("alpha_symbol"), std::string::npos);
 }

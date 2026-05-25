@@ -267,6 +267,66 @@ bool RepoIndex::try_get_chunk(std::uint64_t id, CodeChunk& out) const {
     return true;
 }
 
+std::vector<SyncVectorEntry> RepoIndex::snapshot_vectors(std::size_t limit) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::vector<SyncVectorEntry> out;
+    const auto vectors = vectors_->snapshot(limit);
+    out.reserve(vectors.size());
+    for (const auto& v : vectors) {
+        auto it = chunks_by_id_.find(v.id);
+        if (it == chunks_by_id_.end()) continue;
+        const auto& chunk = it->second;
+        SyncVectorEntry entry;
+        entry.chunk_id = v.id;
+        entry.vec = v.embedding;
+        entry.source_path = chunk.file_path;
+        entry.text = chunk.text;
+        entry.start_line = chunk.start_line;
+        entry.end_line = chunk.end_line;
+        entry.symbol = chunk.symbol;
+        out.push_back(std::move(entry));
+        if (limit > 0 && out.size() >= limit) break;
+    }
+    return out;
+}
+
+std::size_t RepoIndex::apply_synced_vectors(
+    const std::vector<SyncVectorEntry>& vectors) {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::size_t applied = 0;
+    for (const auto& v : vectors) {
+        if (v.chunk_id == 0 || v.vec.size() != config_.embedding_dim ||
+            v.text.empty()) {
+            continue;
+        }
+
+        CodeChunk chunk{
+            v.chunk_id,
+            v.source_path.empty()
+                ? std::string{"synced:"} + std::to_string(v.chunk_id)
+                : v.source_path,
+            v.text,
+            v.start_line == 0 ? 1 : v.start_line,
+            v.end_line == 0 ? (v.start_line == 0 ? 1 : v.start_line) : v.end_line,
+            v.symbol
+        };
+
+        auto& refs = chunk_refs_by_id_[chunk.id];
+        refs[chunk.file_path] = chunk;
+        ids_by_file_[chunk.file_path].insert(chunk.id);
+        chunks_by_id_[chunk.id] = chunk;
+
+        vectors_->add(chunk.id, v.vec);
+        keywords_->add(chunk.id, chunk.text);
+        if (symbol_graph_ && symbol_extractor_) {
+            symbol_graph_->update_chunk(chunk,
+                                        symbol_extractor_->extract(chunk));
+        }
+        ++applied;
+    }
+    return applied;
+}
+
 void RepoIndex::attach_symbol_graph(SymbolGraph* graph,
                                     ISymbolExtractor* extractor) noexcept {
     std::lock_guard<std::mutex> lock(mu_);
