@@ -57,6 +57,7 @@ void VectorStore::add(std::uint64_t id, const std::vector<float>& embedding) {
     // addPoint replaces existing labels when allow_replace_deleted is set.
     index_->addPoint(embedding.data(), static_cast<hnswlib::labeltype>(id),
                      /*replace_deleted*/ true);
+    embeddings_[id] = embedding;
 }
 
 void VectorStore::remove(std::uint64_t id) {
@@ -65,6 +66,7 @@ void VectorStore::remove(std::uint64_t id) {
     } catch (const std::exception&) {
         // Idempotent: removing an unknown id is a no-op.
     }
+    embeddings_.erase(id);
 }
 
 std::vector<VectorHit> VectorStore::search(const std::vector<float>& query, std::size_t k) const {
@@ -100,6 +102,19 @@ void VectorStore::save(const std::string& path) const {
 std::size_t VectorStore::size() const {
     // cur_element_count includes lazily-deleted slots; subtract them.
     return static_cast<std::size_t>(index_->cur_element_count) - index_->getDeletedCount();
+}
+
+std::vector<StoredVector> VectorStore::snapshot(std::size_t limit) const {
+    std::vector<StoredVector> out;
+    const std::size_t reserve = limit > 0
+        ? std::min(limit, embeddings_.size())
+        : embeddings_.size();
+    out.reserve(reserve);
+    for (const auto& kv : embeddings_) {
+        out.push_back({kv.first, kv.second});
+        if (limit > 0 && out.size() >= limit) break;
+    }
+    return out;
 }
 
 } // namespace preprocessor

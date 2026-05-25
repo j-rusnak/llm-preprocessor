@@ -444,6 +444,67 @@ TEST(OpenAIProxy, SyncCacheImportAndExportWithAuth) {
     EXPECT_EQ(roundtrip.cache[0].body, "team-payload");
 }
 
+TEST(OpenAIProxy, SyncVectorExportRequiresConfiguredAuth) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"sync-token"};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Get("/sync/vectors");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 401);
+}
+
+TEST(OpenAIProxy, SyncVectorImportAndExportWithAuth) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"sync-token"};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    preprocessor::SyncEndpoint sync;
+    preprocessor::SyncBundle bundle;
+    preprocessor::SyncVectorEntry vector;
+    vector.chunk_id = 12345;
+    vector.vec = std::vector<float>(16, 0.0f);
+    vector.vec[0] = 1.0f;
+    vector.source_path = "team/alpha.cpp";
+    vector.text = "void team_alpha_symbol() {}";
+    vector.start_line = 3;
+    vector.end_line = 3;
+    vector.symbol = "team_alpha_symbol";
+    bundle.vectors.push_back(vector);
+
+    httplib::Client cli("127.0.0.1", h.port);
+    httplib::Headers headers{{"X-Preprocessor-Authorization", "Bearer sync-token"}};
+    auto imported = cli.Post("/sync/vectors", headers, sync.to_json(bundle),
+                             "application/json");
+
+    ASSERT_TRUE(imported);
+    EXPECT_EQ(imported->status, 200);
+    auto imported_json = json::parse(imported->body);
+    EXPECT_EQ(imported_json["applied_vector_entries"], 1u);
+    EXPECT_EQ(imported_json["bundles_imported"], 1u);
+    EXPECT_EQ(h.index.chunk_count(), 1u);
+
+    auto hits = h.index.search("team_alpha_symbol", 3);
+    ASSERT_FALSE(hits.empty());
+    EXPECT_NE(hits[0].chunk.text.find("team_alpha_symbol"), std::string::npos);
+
+    auto exported = cli.Get("/sync/vectors", headers);
+    ASSERT_TRUE(exported);
+    EXPECT_EQ(exported->status, 200);
+    auto roundtrip = sync.from_json(exported->body);
+    ASSERT_EQ(roundtrip.vectors.size(), 1u);
+    EXPECT_EQ(roundtrip.vectors[0].chunk_id, 12345u);
+    EXPECT_EQ(roundtrip.vectors[0].text, "void team_alpha_symbol() {}");
+}
+
 TEST(OpenAIProxy, StructuralFastPathHonorsStreamingSse) {
     ProxyHarness h;
     FakeUpstream up;

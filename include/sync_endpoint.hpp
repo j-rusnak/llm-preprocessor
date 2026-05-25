@@ -22,6 +22,10 @@ struct SyncVectorEntry {
     std::uint64_t chunk_id = 0;
     std::vector<float> vec;
     std::string source_path;
+    std::string text;
+    std::size_t start_line = 0;
+    std::size_t end_line = 0;
+    std::string symbol;
 };
 
 /// Aggregate bundle traded between team-mode peers.
@@ -49,6 +53,9 @@ public:
 
     /// Record a successful export (telemetry only).
     void note_export() noexcept;
+
+    /// Record a successful import (telemetry only).
+    void note_import() noexcept;
 
     /// Telemetry.
     std::size_t bundles_exported() const noexcept;

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace hnswlib {
@@ -18,6 +19,11 @@ namespace preprocessor {
 struct VectorHit {
     std::uint64_t id;
     float distance;
+};
+
+struct StoredVector {
+    std::uint64_t id;
+    std::vector<float> embedding;
 };
 
 /// Persistent HNSW-backed approximate-nearest-neighbour store for code-chunk
@@ -64,6 +70,9 @@ public:
     /// Current number of inserted (non-deleted) vectors.
     std::size_t size() const;
 
+    /// Snapshot stored vectors. `limit == 0` means no limit.
+    std::vector<StoredVector> snapshot(std::size_t limit = 0) const;
+
     /// Embedding dimensionality.
     std::size_t dim() const { return dim_; }
 
@@ -74,6 +83,7 @@ private:
     std::string metric_;
     std::unique_ptr<hnswlib::SpaceInterface<float>> space_;
     std::unique_ptr<hnswlib::HierarchicalNSW<float>> index_;
+    std::unordered_map<std::uint64_t, std::vector<float>> embeddings_;
 };
 
 } // namespace preprocessor

@@ -17,8 +17,7 @@ std::size_t SyncEndpoint::apply_to_cache(const SyncBundle& bundle, PromptCache* 
             ++n;
         }
     }
-    std::lock_guard<std::mutex> lock(mu_);
-    ++imports_;
+    note_import();
     return n;
 }
 
@@ -34,6 +33,10 @@ std::string SyncEndpoint::to_json(const SyncBundle& bundle) const {
             {"chunk_id", v.chunk_id},
             {"vec", v.vec},
             {"source_path", v.source_path},
+            {"text", v.text},
+            {"start_line", v.start_line},
+            {"end_line", v.end_line},
+            {"symbol", v.symbol},
         });
     }
     return j.dump();
@@ -61,6 +64,10 @@ SyncBundle SyncEndpoint::from_json(const std::string& s) const {
                 }
             }
             v.source_path = e.value("source_path", "");
+            v.text = e.value("text", "");
+            v.start_line = e.value("start_line", static_cast<std::size_t>(0));
+            v.end_line = e.value("end_line", static_cast<std::size_t>(0));
+            v.symbol = e.value("symbol", "");
             b.vectors.push_back(std::move(v));
         }
     }
@@ -70,6 +77,11 @@ SyncBundle SyncEndpoint::from_json(const std::string& s) const {
 void SyncEndpoint::note_export() noexcept {
     std::lock_guard<std::mutex> lock(mu_);
     ++exports_;
+}
+
+void SyncEndpoint::note_import() noexcept {
+    std::lock_guard<std::mutex> lock(mu_);
+    ++imports_;
 }
 
 std::size_t SyncEndpoint::bundles_exported() const noexcept {

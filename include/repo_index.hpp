@@ -1,6 +1,7 @@
 #pragma once
 
 #include "code_chunker.hpp"
+#include "sync_endpoint.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -97,6 +98,14 @@ public:
 
     /// Look up a single chunk by id. Returns `false` if unknown.
     bool try_get_chunk(std::uint64_t id, CodeChunk& out) const;
+
+    /// Snapshot vector entries with enough chunk metadata for a peer to
+    /// hydrate search results. `limit == 0` means no limit.
+    std::vector<SyncVectorEntry> snapshot_vectors(std::size_t limit = 0) const;
+
+    /// Merge synced vectors and chunk metadata into the local index. Returns
+    /// the number of entries applied.
+    std::size_t apply_synced_vectors(const std::vector<SyncVectorEntry>& vectors);
 
     /// Attach a Phase 3 symbol graph + extractor. Both pointers are
     /// borrowed (caller owns; must outlive the index). When attached,

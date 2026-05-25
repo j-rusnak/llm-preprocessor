@@ -52,7 +52,7 @@ effectiveness before claiming completion.
    symbol extraction, and model-accurate token budgeting.
 3. Add protocol edge cases: streaming structural fast path, upstream error
    propagation, and client disconnect handling.
-4. Add vector snapshot/export support before wiring `/sync/vectors`.
+4. Add broader protocol hardening for upstream error mapping and disconnects.
 
 ## Security Notes
 
