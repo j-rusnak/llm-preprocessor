@@ -715,22 +715,24 @@ void OpenAIProxy::install_routes() {
             }
         }
 
-        std::vector<std::uint64_t> chunk_ids;
-        chunk_ids.reserve(retrieved.size());
-        for (const auto& r : retrieved) chunk_ids.push_back(r.chunk.id);
-
         // Inject retrieved context as a system message.
         const std::size_t original_tokens =
             tokenizer_.count_tokens_for_model(effective_model, req.body);
         std::string sys_content;
+        PackedContext packed_context;
+        bool packed_retrieved_context = false;
         if (optimiser_) {
             auto opt = optimiser_->optimise(user_msg, retrieved);
+            packed_context = std::move(opt.packed_context);
+            packed_retrieved_context = !retrieved.empty();
             sys_content = std::move(opt.system_message);
         } else if (!retrieved.empty()) {
             ContextPackerConfig pack_cfg;
             pack_cfg.max_context_chars = max_context_chars;
             pack_cfg.include_header = true;
-            sys_content = pack_context(retrieved, pack_cfg).text;
+            packed_context = pack_context(retrieved, pack_cfg);
+            packed_retrieved_context = true;
+            sys_content = packed_context.text;
         }
         if (rewriter_ && !sys_content.empty()) {
             try {
@@ -747,6 +749,13 @@ void OpenAIProxy::install_routes() {
             msgs.insert(msgs.end() - 1, sys_msg);
         }
         const std::string compiled = body.dump();
+        std::vector<std::uint64_t> chunk_ids;
+        if (packed_retrieved_context) {
+            chunk_ids = packed_context.included_chunk_ids;
+        } else {
+            chunk_ids.reserve(retrieved.size());
+            for (const auto& r : retrieved) chunk_ids.push_back(r.chunk.id);
+        }
         // Cache the fully compiled upstream request, not just the user text.
         // Request parameters such as temperature, tools, existing system
         // messages, optimiser output, and rewritten context all affect the
@@ -759,6 +768,14 @@ void OpenAIProxy::install_routes() {
                 res.set_content(*cached, "application/json");
                 return;
             }
+        }
+
+        if (packed_retrieved_context) {
+            metrics_.observe_context_pack(
+                static_cast<std::uint64_t>(packed_context.included_chunk_ids.size()),
+                static_cast<std::uint64_t>(packed_context.omitted_chunk_ids.size()),
+                static_cast<std::uint64_t>(sys_content.size()),
+                packed_context.truncated);
         }
 
         const std::size_t compiled_tokens =

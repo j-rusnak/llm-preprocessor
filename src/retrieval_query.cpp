@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -205,6 +206,11 @@ void add_language_from_token(std::vector<std::string>& languages,
     }
 }
 
+bool is_compound_language_token(const std::string& token) {
+    return token == "typescript" || token == "javascript" ||
+           token == "cplusplus" || token == "csharp";
+}
+
 void add_language_from_path(std::vector<std::string>& languages,
                             const std::string& path) {
     if (path == "cmakelists.txt" ||
@@ -257,6 +263,13 @@ void add_language_from_path(std::vector<std::string>& languages,
     }
 }
 
+void append_unique_terms(std::vector<std::string>& values,
+                         const std::vector<std::string>& additions) {
+    for (const auto& value : additions) {
+        add_unique(values, value);
+    }
+}
+
 std::vector<std::string> raw_tokens(const std::string& text) {
     std::vector<std::string> tokens;
     std::string current;
@@ -296,6 +309,9 @@ RetrievalQuery parse_retrieval_query(const std::string& text) {
         const std::string compact = alnum_compact(raw);
         const std::string normalized = normalized_identifier(raw);
         const auto parts = split_identifier_parts(raw);
+        const std::string raw_lower = lower(raw);
+        const bool language_token = is_compound_language_token(raw_lower) ||
+                                    is_compound_language_token(compact);
 
         if (is_path) {
             const auto path = normalize_path(raw);
@@ -303,16 +319,20 @@ RetrievalQuery parse_retrieval_query(const std::string& text) {
             add_language_from_path(query.language_hints, path);
         }
 
-        for (const auto& part : parts) {
-            add_search_term(query.terms, part);
-            add_language_from_token(query.language_hints, part);
+        if (!is_path && language_token) {
+            add_search_term(query.terms, compact);
+        } else {
+            for (const auto& part : parts) {
+                add_search_term(query.terms, part);
+                add_language_from_token(query.language_hints, part);
+            }
         }
 
         if (!is_path && compact.size() >= 2 && parts.size() > 1) {
             add_search_term(query.terms, compact);
         }
 
-        add_language_from_token(query.language_hints, lower(raw));
+        add_language_from_token(query.language_hints, raw_lower);
         add_language_from_token(query.language_hints, compact);
 
         if (!is_path && !normalized.empty() &&
@@ -322,6 +342,20 @@ RetrievalQuery parse_retrieval_query(const std::string& text) {
     }
 
     return query;
+}
+
+std::string build_lexical_query_text(const RetrievalQuery& query) {
+    std::vector<std::string> values = query.terms;
+    append_unique_terms(values, query.identifier_terms);
+    append_unique_terms(values, query.path_hints);
+    append_unique_terms(values, query.language_hints);
+
+    std::ostringstream out;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) out << ' ';
+        out << values[i];
+    }
+    return out.str();
 }
 
 } // namespace preprocessor

@@ -206,7 +206,7 @@ JSON payload (OpenAI-compatible) for the upstream LLM
 | **HybridRetriever** | `hybrid_retriever.hpp` | RRF fusion of `VectorStore` + `BM25Index` hits. |
 | **ContextPacker** | `context_packer.hpp` | Shared retrieved-context formatter with budget metadata for included and omitted chunks. |
 | **PromptCache** | `prompt_cache.hpp` | SQLite-backed cache of upstream responses, keyed by `(model, compiled request, chunk_ids)`. |
-| **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, stream cancellations, tokens saved, and per-model-family token totals. |
+| **ProxyMetrics** | `proxy_metrics.hpp` | Atomic counters for requests, cache hits, upstream calls, stream cancellations, tokens saved, context packing, and per-model-family token totals. |
 | **RepoIndex** | `repo_index.hpp` | End-to-end chunk + embed + index over a repo, kept fresh by `FileWatcher`. |
 | **OpenAIProxy** | `openai_proxy.hpp` | cpp-httplib server, OpenAI-compatible chat completions with RAG context injection. |
 | **ProjectCard** | `project_card.hpp` | Repository summary (extensions, top symbols, README excerpt) derived from `RepoIndex`. |
@@ -476,14 +476,14 @@ Endpoints:
 - `POST /v1/chat/completions` - drop-in OpenAI chat completions; the proxy
   retrieves top-k relevant code chunks, injects them as a system message,
   forwards to `upstream_url`, caches the response by
-  `(model, compiled upstream request, chunk_ids)`.
+  `(model, compiled upstream request, included_chunk_ids)`.
   Requests with `"stream": true` are forwarded as `text/event-stream` and are
   not cached.
 - `GET /healthz` - liveness check.
 - `GET /stats` - JSON snapshot of `ProxyMetrics` (tokens saved, cache hits,
   upstream calls, auth/rate/request-size denials, upstream errors, stream
-  cancellations, and per-model-family token totals). Protected by proxy auth
-  when auth is configured.
+  cancellations, context packing totals, and per-model-family token totals).
+  Protected by proxy auth when auth is configured.
 - `GET /sync/cache` - export a `SyncBundle` containing recent cache entries.
   Protected by proxy auth when auth is configured.
 - `POST /sync/cache` - import cache entries from a peer `SyncBundle`.

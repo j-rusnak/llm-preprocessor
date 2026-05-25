@@ -1,6 +1,5 @@
 #include "prompt_optimizer.hpp"
 
-#include "context_packer.hpp"
 #include "repo_index.hpp"  // RetrievedChunk + CodeChunk
 
 #include <stdexcept>
@@ -10,12 +9,12 @@ namespace preprocessor {
 
 namespace {
 
-std::string plain_context_message(const std::vector<RetrievedChunk>& chunks,
-                                  std::size_t max_chars) {
+PackedContext plain_context(const std::vector<RetrievedChunk>& chunks,
+                            std::size_t max_chars) {
     ContextPackerConfig cfg;
     cfg.max_context_chars = max_chars;
     cfg.include_header = true;
-    return pack_context(chunks, cfg).text;
+    return pack_context(chunks, cfg);
 }
 
 } // namespace
@@ -58,7 +57,8 @@ PromptOptimizer::Result PromptOptimizer::optimise(
 
     // Disabled path: behave exactly like Phase 1.
     if (!enabled()) {
-        r.system_message = plain_context_message(chunks, config_.max_context_chars);
+        r.packed_context = plain_context(chunks, config_.max_context_chars);
+        r.system_message = r.packed_context.text;
         return r;
     }
 
@@ -68,7 +68,8 @@ PromptOptimizer::Result PromptOptimizer::optimise(
     ContextPackerConfig pack_cfg;
     pack_cfg.max_context_chars = config_.max_context_chars;
     pack_cfg.include_header = false;
-    in.context = pack_context(chunks, pack_cfg).text;
+    r.packed_context = pack_context(chunks, pack_cfg);
+    in.context = r.packed_context.text;
     if (config_.include_project_card && has_card_) {
         in.project_card = card_.to_markdown();
     }

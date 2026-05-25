@@ -49,6 +49,14 @@ nlohmann::json ProxyMetrics::snapshot() const {
         {"tokens_in_original", tokens_in_original.load(std::memory_order_relaxed)},
         {"tokens_in_compiled", tokens_in_compiled.load(std::memory_order_relaxed)},
         {"tokens_saved",       tokens_saved.load(std::memory_order_relaxed)},
+        {"context_chunks_included_total",
+            context_chunks_included_total.load(std::memory_order_relaxed)},
+        {"context_chunks_omitted_total",
+            context_chunks_omitted_total.load(std::memory_order_relaxed)},
+        {"context_chars_injected_total",
+            context_chars_injected_total.load(std::memory_order_relaxed)},
+        {"context_truncations_total",
+            context_truncations_total.load(std::memory_order_relaxed)},
         {"tokens_by_model_family", by_family},
     };
 }

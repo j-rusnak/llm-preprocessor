@@ -1,6 +1,7 @@
 #include "hybrid_retriever.hpp"
 
 #include "bm25_index.hpp"
+#include "retrieval_query.hpp"
 #include "vector_store.hpp"
 
 #include <algorithm>
@@ -25,7 +26,9 @@ HybridRetriever::search(const std::string& query_text,
     const std::size_t per_backend = std::max<std::size_t>(k, k * oversample);
 
     auto v_hits = vectors_.search(query_embedding, per_backend);
-    auto b_hits = keywords_.search(query_text, per_backend);
+    const auto parsed_query = parse_retrieval_query(query_text);
+    auto b_hits = keywords_.search(build_lexical_query_text(parsed_query),
+                                   per_backend);
 
     struct Acc {
         float score = 0.0f;

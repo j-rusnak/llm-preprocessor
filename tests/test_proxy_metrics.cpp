@@ -15,6 +15,10 @@ TEST(ProxyMetrics, CountersStartAtZero) {
     EXPECT_EQ(j["upstream_errors_total"], 0u);
     EXPECT_EQ(j["stream_cancellations_total"], 0u);
     EXPECT_EQ(j["tokens_saved"], 0u);
+    EXPECT_EQ(j["context_chunks_included_total"], 0u);
+    EXPECT_EQ(j["context_chunks_omitted_total"], 0u);
+    EXPECT_EQ(j["context_chars_injected_total"], 0u);
+    EXPECT_EQ(j["context_truncations_total"], 0u);
 }
 
 TEST(ProxyMetrics, IncrementsAccumulate) {
@@ -63,4 +67,16 @@ TEST(ProxyMetrics, TracksTokenTotalsByModelFamily) {
     EXPECT_EQ(j["tokens_by_model_family"]["gpt-4o"]["compiled"], 90u);
     EXPECT_EQ(j["tokens_by_model_family"]["gpt-4o"]["saved"], 30u);
     EXPECT_EQ(j["tokens_by_model_family"]["claude"]["saved"], 0u);
+}
+
+TEST(ProxyMetrics, TracksContextPackingTotals) {
+    ProxyMetrics m;
+    m.observe_context_pack(2, 1, 250, true);
+    m.observe_context_pack(1, 0, 90, false);
+
+    auto j = m.snapshot();
+    EXPECT_EQ(j["context_chunks_included_total"], 3u);
+    EXPECT_EQ(j["context_chunks_omitted_total"], 1u);
+    EXPECT_EQ(j["context_chars_injected_total"], 340u);
+    EXPECT_EQ(j["context_truncations_total"], 1u);
 }
