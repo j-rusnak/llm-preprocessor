@@ -53,6 +53,9 @@ struct FakeUpstream {
     std::string last_body;
     std::string last_authorization;
     bool streaming_response = false;
+    int response_status = 200;
+    std::string response_body;
+    std::string response_content_type = "application/json";
 
     FakeUpstream() : server(std::make_shared<httplib::Server>()) {
         server->Post("/v1/chat/completions",
@@ -62,6 +65,7 @@ struct FakeUpstream {
             last_authorization = req.has_header("Authorization")
                 ? req.get_header_value("Authorization")
                 : std::string{};
+            res.status = response_status;
             if (streaming_response) {
                 res.set_chunked_content_provider(
                     "text/event-stream",
@@ -79,6 +83,10 @@ struct FakeUpstream {
                     });
                 return;
             }
+            if (!response_body.empty()) {
+                res.set_content(response_body, response_content_type);
+                return;
+            }
             json out = {
                 {"id", "fake-1"},
                 {"object", "chat.completion"},
@@ -89,7 +97,7 @@ struct FakeUpstream {
                 })},
                 {"echo_body_len", req.body.size()}
             };
-            res.set_content(out.dump(), "application/json");
+            res.set_content(out.dump(), response_content_type);
         });
         port = server->bind_to_any_port("127.0.0.1");
         thr = std::thread([this] { server->listen_after_bind(); });
@@ -356,6 +364,51 @@ TEST(OpenAIProxy, StreamingRequestsAreNotServedFromPromptCache) {
     ASSERT_TRUE(r2);
     EXPECT_EQ(r2->status, 200);
     EXPECT_EQ(up.calls.load(), 2);
+}
+
+TEST(OpenAIProxy, PreservesUpstreamErrorStatusAndContentType) {
+    ProxyHarness h;
+    FakeUpstream up;
+    up.response_status = 429;
+    up.response_content_type = "application/problem+json";
+    up.response_body = R"({"error":{"message":"slow down"}})";
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions");
+
+    json body = {
+        {"model", "gpt-test"},
+        {"messages", json::array({{{"role", "user"}, {"content", "hello"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 429);
+    EXPECT_EQ(r->get_header_value("Content-Type"), "application/problem+json");
+    EXPECT_EQ(r->body, up.response_body);
+}
+
+TEST(OpenAIProxy, StreamingTransportFailureEmitsErrorAndDone) {
+    ProxyHarness h;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.upstream_timeout_seconds = 1;
+    h.start("http://127.0.0.1:1/v1/chat/completions", cfg);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"stream", true},
+        {"messages", json::array({{{"role", "user"}, {"content", "hello"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    cli.set_read_timeout(5, 0);
+    auto r = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+    EXPECT_EQ(r->get_header_value("Content-Type"), "text/event-stream");
+    EXPECT_NE(r->body.find("event: error"), std::string::npos);
+    EXPECT_NE(r->body.find("data: [DONE]"), std::string::npos);
 }
 
 TEST(OpenAIProxy, ModelRouterSelectsTierAndRewritesForwardedRequest) {
