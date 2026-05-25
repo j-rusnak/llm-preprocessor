@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LLM Preprocessor Performance</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Performance Console</h1>
+        <p id="subtitle">Context, memory, retrieval, and LLM-efficiency telemetry</p>
+      </div>
+      <div class="actions">
+        <button id="runEffectiveness" type="button">Run effectiveness</button>
+        <button id="refreshNow" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="status-row" aria-live="polite">
+        <div>
+          <span class="label">Status</span>
+          <strong id="statusText">Connecting</strong>
+        </div>
+        <div>
+          <span class="label">Latest sample</span>
+          <strong id="latestSample">None</strong>
+        </div>
+        <div>
+          <span class="label">Samples</span>
+          <strong id="sampleCount">0</strong>
+        </div>
+      </section>
+
+      <section id="cards" class="cards" aria-label="Current performance metrics"></section>
+
+      <section class="chart-grid" aria-label="Performance charts">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>LLM Efficiency</h2>
+            <span>token and transport reduction</span>
+          </div>
+          <canvas id="efficiencyChart" width="760" height="260"></canvas>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Retrieval Quality</h2>
+            <span>accuracy and query latency</span>
+          </div>
+          <canvas id="retrievalChart" width="760" height="260"></canvas>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Memory and Cache</h2>
+            <span>cache multipliers and live hit rate</span>
+          </div>
+          <canvas id="memoryChart" width="760" height="260"></canvas>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Context Flow</h2>
+            <span>packing and injected-context volume</span>
+          </div>
+          <canvas id="contextChart" width="760" height="260"></canvas>
+        </article>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="panel-head">
+          <h2>Recent Samples</h2>
+          <span>newest first</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Kind</th>
+                <th>Token %</th>
+                <th>Fixture top-3</th>
+                <th>Cache</th>
+                <th>Requests</th>
+              </tr>
+            </thead>
+            <tbody id="sampleRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
