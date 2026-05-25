@@ -236,6 +236,63 @@ TEST(OpenAIProxy, CacheKeyIncludesFullCompiledRequest) {
     EXPECT_EQ(up.calls.load(), 2);
 }
 
+TEST(OpenAIProxy, CacheKeyIgnoresChunksOmittedByContextBudget) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.max_context_chars = 1;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    auto synced = [](std::uint64_t id,
+                     const std::string& path,
+                     const std::string& text) {
+        preprocessor::SyncVectorEntry entry;
+        entry.chunk_id = id;
+        entry.source_path = path;
+        entry.text = text;
+        entry.start_line = 1;
+        entry.end_line = 1;
+        entry.symbol = "target_symbol";
+        entry.vec.assign(16, 0.0f);
+        entry.vec[0] = 1.0f;
+        return entry;
+    };
+
+    ASSERT_EQ(h.index.apply_synced_vectors(
+                  {synced(101, "a.cpp", "target_symbol first")}), 1u);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"messages", json::array({
+            {{"role", "user"}, {"content", "target_symbol"}}
+        })}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r1 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    ASSERT_TRUE(r1);
+    EXPECT_EQ(r1->status, 200);
+    EXPECT_EQ(up.calls.load(), 1);
+
+    h.index.forget_file("a.cpp");
+    ASSERT_EQ(h.index.apply_synced_vectors(
+                  {synced(202, "b.cpp", "target_symbol second")}), 1u);
+
+    auto r2 = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    ASSERT_TRUE(r2);
+    EXPECT_EQ(r2->status, 200);
+    EXPECT_EQ(up.calls.load(), 1);
+
+    auto stats = cli.Get("/stats");
+    ASSERT_TRUE(stats);
+    auto metrics = json::parse(stats->body);
+    EXPECT_EQ(metrics["cache_hits"], 1u);
+    EXPECT_EQ(metrics["context_chunks_included_total"], 0u);
+    EXPECT_EQ(metrics["context_chunks_omitted_total"], 1u);
+    EXPECT_EQ(metrics["context_truncations_total"], 1u);
+}
+
 TEST(OpenAIProxy, BadJsonReturns400) {
     ProxyHarness h;
     FakeUpstream up;

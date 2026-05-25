@@ -1,5 +1,6 @@
 #pragma once
 
+#include "context_packer.hpp"
 #include "intent_classifier.hpp"
 #include "project_card.hpp"
 #include "prompt_templates.hpp"
@@ -58,6 +59,9 @@ public:
         /// True when a template was actually rendered (i.e. optimiser
         /// enabled and either chunks or project card were present).
         bool used_template = false;
+        /// Metadata for the retrieved-code context that was packed for this
+        /// result. Empty when no retrieved chunks were supplied.
+        PackedContext packed_context;
     };
 
     Result optimise(const std::string& user_message,

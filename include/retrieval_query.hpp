@@ -29,4 +29,8 @@ struct RetrievalQuery {
 
 RetrievalQuery parse_retrieval_query(const std::string& text);
 
+/// Build an order-preserving, deduped text query suitable for lexical
+/// retrieval from a parsed query's terms, identifiers, paths, and languages.
+std::string build_lexical_query_text(const RetrievalQuery& query);
+
 } // namespace preprocessor

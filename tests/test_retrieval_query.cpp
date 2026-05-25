@@ -83,3 +83,12 @@ TEST(RetrievalQuery, DropsShortStopWordsButKeepsCodeAcronyms) {
     EXPECT_FALSE(contains(query.terms, "in"));
     EXPECT_FALSE(contains(query.terms, "on"));
 }
+
+TEST(RetrievalQuery, BuildsLexicalQueryTextFromAllRankingSignals) {
+    const auto query = preprocessor::parse_retrieval_query(
+        "fix src\\net\\getHTTPStatus.cpp in TypeScript getHTTPStatus");
+
+    EXPECT_EQ(preprocessor::build_lexical_query_text(query),
+              "fix src net get http status cpp typescript gethttpstatus "
+              "src/net/gethttpstatus.cpp");
+}

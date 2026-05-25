@@ -28,6 +28,11 @@ namespace preprocessor {
 ///   - tokens_saved         : max(0, original - compiled). Approximates the
 ///                            cost reduction delivered by sanitiser +
 ///                            chunk-selection vs naive forwarding.
+///   - context_chunks_included_total / omitted_total : retrieved chunks that
+///                            did or did not fit into injected context.
+///   - context_chars_injected_total : context-system-message chars sent
+///                            upstream after optional rewriting.
+///   - context_truncations_total : requests where packing omitted chunks.
 class ProxyMetrics {
 public:
     struct TokenTotals {
@@ -67,6 +72,21 @@ public:
                         std::uint64_t original,
                         std::uint64_t compiled);
 
+    void observe_context_pack(std::uint64_t included_chunks,
+                              std::uint64_t omitted_chunks,
+                              std::uint64_t injected_chars,
+                              bool truncated) {
+        context_chunks_included_total.fetch_add(included_chunks,
+                                                std::memory_order_relaxed);
+        context_chunks_omitted_total.fetch_add(omitted_chunks,
+                                               std::memory_order_relaxed);
+        context_chars_injected_total.fetch_add(injected_chars,
+                                              std::memory_order_relaxed);
+        if (truncated) {
+            context_truncations_total.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
     nlohmann::json snapshot() const;
 
     std::atomic<std::uint64_t> requests_total{0};
@@ -81,6 +101,10 @@ public:
     std::atomic<std::uint64_t> tokens_in_original{0};
     std::atomic<std::uint64_t> tokens_in_compiled{0};
     std::atomic<std::uint64_t> tokens_saved{0};
+    std::atomic<std::uint64_t> context_chunks_included_total{0};
+    std::atomic<std::uint64_t> context_chunks_omitted_total{0};
+    std::atomic<std::uint64_t> context_chars_injected_total{0};
+    std::atomic<std::uint64_t> context_truncations_total{0};
 
 private:
     mutable std::mutex token_family_mutex_;

@@ -65,6 +65,19 @@ TEST(HybridRetriever, KeywordOnlyStillReturnsResults) {
     EXPECT_EQ(hits[0].id, 42u);
 }
 
+TEST(HybridRetriever, KeywordSearchUsesNormalizedIdentifierTerms) {
+    VectorStore vec(4, 16);
+    BM25Index bm;
+    bm.add(42, "handles http status responses");
+
+    HybridRetriever h(vec, bm);
+    auto hits = h.search("getHTTPStatus", axis_vec(0), 3);
+
+    ASSERT_EQ(hits.size(), 1u);
+    EXPECT_EQ(hits[0].id, 42u);
+    EXPECT_GT(hits[0].keyword_score, 0.0f);
+}
+
 TEST(HybridRetriever, RejectsZeroK) {
     VectorStore vec(4, 16);
     BM25Index bm;

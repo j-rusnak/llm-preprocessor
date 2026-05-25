@@ -110,3 +110,24 @@ TEST(PromptOptimizer, ContextCharBudgetTruncates) {
     // Budget should drop at least the second chunk.
     EXPECT_EQ(r.system_message.find("b.cpp"), std::string::npos);
 }
+
+TEST(PromptOptimizer, ResultIncludesPackedContextMetadata) {
+    auto cls = std::make_shared<HeuristicIntentClassifier>();
+    PromptOptimizerConfig cfg;
+    cfg.enabled = true;
+    cfg.include_project_card = false;
+    cfg.max_context_chars = 45;
+    PromptOptimizer opt(PromptTemplates{}, cls, cfg);
+
+    auto r = opt.optimise("explain this",
+                          {mkchunk(10, "int a;", "a.cpp", "a"),
+                           mkchunk(20, std::string(200, 'B'), "b.cpp", "b")});
+
+    ASSERT_EQ(r.packed_context.included_chunk_ids.size(), 1u);
+    EXPECT_EQ(r.packed_context.included_chunk_ids[0], 10u);
+    ASSERT_EQ(r.packed_context.omitted_chunk_ids.size(), 1u);
+    EXPECT_EQ(r.packed_context.omitted_chunk_ids[0], 20u);
+    EXPECT_TRUE(r.packed_context.truncated);
+    EXPECT_NE(r.packed_context.text.find("a.cpp"), std::string::npos);
+    EXPECT_EQ(r.packed_context.text.find("b.cpp"), std::string::npos);
+}

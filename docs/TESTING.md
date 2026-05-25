@@ -283,15 +283,17 @@ overrides. Non-zero exit means *do not start the server*.
 
 ```cpp
 preprocessor::PromptCache cache("cache.sqlite", /*ttl_seconds=*/86400);
-auto key = preprocessor::PromptCache::make_key(model, compiled_upstream_request, chunk_ids);
+auto key = preprocessor::PromptCache::make_key(model, compiled_upstream_request, included_chunk_ids);
 if (auto hit = cache.get(key)) {
     return *hit;            // skip upstream
 }
 cache.put(key, upstream_response);
 ```
 
-The key includes the model id and the full compiled upstream request, so changes
-to parameters such as `temperature`, tools, or injected context do not collide.
+The key includes the model id, the full compiled upstream request, and the ids
+of chunks that fit the injected context budget, so changes to parameters such as
+`temperature`, tools, or injected context do not collide while omitted chunks do
+not create avoidable misses.
 
 ### 5.5 `HeuristicCompressionRewriter` (Phase 5)
 
