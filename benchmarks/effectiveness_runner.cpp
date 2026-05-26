@@ -782,6 +782,24 @@ json measure_fixture_retrieval() {
             "markdown retrieval debugging near miss expected rank diagnostics",
             "docs/retrieval-debugging.md"
         },
+        {
+            "python",
+            "security",
+            "python auth dependency override verify bearer token request state",
+            "realworld/python/service_auth.py"
+        },
+        {
+            "typescript",
+            "context",
+            "typescript agent context store retrieval window persistence budget",
+            "realworld/typescript/agent_context_store.ts"
+        },
+        {
+            "cpp",
+            "streaming",
+            "cpp stream forwarder cancel upstream on client disconnect idle timeout",
+            "realworld/cpp/stream_forwarder.cpp"
+        },
     };
 
     struct QueryAggregate {
