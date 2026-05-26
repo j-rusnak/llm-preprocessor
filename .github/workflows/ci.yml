@@ -130,6 +130,7 @@ jobs:
               throw "Missing installed artifact: $path"
             }
           }
+          python tools/package_audit.py build/install-check
 
       - name: Unit tests
         shell: pwsh
@@ -146,6 +147,10 @@ jobs:
       - name: Visualizer unit tests
         shell: pwsh
         run: python -m unittest discover tools/perf_visualizer/tests -p "test_*.py"
+
+      - name: Release tooling unit tests
+        shell: pwsh
+        run: python -m unittest discover tools/tests -p "test_*.py"
 
       - name: Visualizer Playwright smoke
         shell: pwsh
