@@ -4,7 +4,7 @@
   "repo_root": ".",
   "proxy_host": "0.0.0.0",
   "proxy_port": 8088,
-  "proxy_auth_bearer_tokens": ["team-lan-proxy-token-alpha"],
+  "proxy_auth_bearer_tokens": ["replace-with-strong-lan-proxy-token"],
   "proxy_auth_hmac_secret": "",
   "proxy_auth_max_clock_skew_seconds": 300,
   "proxy_forward_client_authorization": false,

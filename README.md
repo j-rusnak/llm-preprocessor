@@ -179,11 +179,13 @@ See [`vscode-extension/`](vscode-extension/) for the local MCP integration shim.
 
 Start from [`config.production.example.json`](config.production.example.json)
 for loopback-local production use, or
-[`config.lan.example.json`](config.lan.example.json) for a secured
-non-loopback LAN deployment. Both examples are auth-enabled, rate-limited, keep
-request-size limits positive, and leave `upstream_api_key` empty for local
-secret injection. See [docs/PRODUCTION_CONFIG.md](docs/PRODUCTION_CONFIG.md)
-for health checks, auth separation, and deployment guidance.
+[`config.lan.example.json`](config.lan.example.json) as a secured non-loopback
+LAN deployment template. The tracked LAN template intentionally fails until
+copied to a private local config and given a non-placeholder proxy token. Both
+profiles are auth-enabled, rate-limited, keep request-size limits positive, and
+leave `upstream_api_key` empty for local secret injection. See
+[docs/PRODUCTION_CONFIG.md](docs/PRODUCTION_CONFIG.md) for health checks, auth
+separation, and deployment guidance.
 
 | Key | Default | Purpose |
 |---|---|---|

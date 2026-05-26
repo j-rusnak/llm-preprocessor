@@ -74,7 +74,8 @@ Before using `--serve` outside a local test:
 
 - Copy `config.production.example.json` for loopback-local deployments or
   `config.lan.example.json` for secured non-loopback LAN deployments.
-- Replace every example local proxy token with a deployment-specific value.
+- Replace every example local proxy token with a deployment-specific value
+  before running health or serve on a copied LAN config.
 - Keep `proxy_forward_client_authorization` disabled when local proxy auth uses
   `X-Preprocessor-Authorization`.
 - Keep `proxy_max_request_bytes` positive.

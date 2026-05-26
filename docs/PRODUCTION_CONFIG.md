@@ -5,11 +5,13 @@ It binds to `127.0.0.1`, requires local proxy auth, rate-limits callers, caps
 request body size, enables graph-backed retrieval, enables structural fast-path
 answers, and keeps upstream provider auth separate from local proxy auth.
 
-Use `config.lan.example.json` only when another trusted machine on the LAN must
-reach the proxy. It binds to `0.0.0.0`, keeps
-`allow_unsafe_remote_proxy: false`, requires a non-placeholder local bearer
-token, disables forwarding the client `Authorization` header upstream, and keeps
-positive rate-limit and request-size settings.
+Use `config.lan.example.json` only as a template when another trusted machine
+on the LAN must reach the proxy. It binds to `0.0.0.0`, keeps
+`allow_unsafe_remote_proxy: false`, disables forwarding the client
+`Authorization` header upstream, and keeps positive rate-limit and request-size
+settings. The tracked file intentionally contains a placeholder local bearer
+token, so it must be copied to a private local config and given a deployment
+token before it can pass health or serve.
 
 ## Auth Separation
 
@@ -36,13 +38,20 @@ Run health before serving a profile:
 
 ```powershell
 .\build\preprocessor_app.exe --health config.production.example.json
-.\build\preprocessor_app.exe --health config.lan.example.json
+Copy-Item config.lan.example.json config.lan.local.json
+# Edit config.lan.local.json and replace proxy_auth_bearer_tokens.
+.\build\preprocessor_app.exe --health config.lan.local.json
 ```
 
 Expected prerequisite: the configured embedding model and vocabulary must exist
 at `model_path` and `vocab_path`, for example `models/model.onnx` and
 `models/vocab.txt`. If those local assets are missing, health may exit non-zero;
 install the model and vocab instead of weakening the config.
+
+The tracked LAN template is expected to fail health until its placeholder token
+is replaced. Placeholder-looking non-loopback bearer tokens containing markers
+such as `replace`, `change-me`, `changeme`, `placeholder`, or `example` are
+rejected by `ConfigLoader`.
 
 After health passes, start the proxy:
 
