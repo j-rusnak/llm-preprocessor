@@ -35,18 +35,7 @@ These paths are intentionally ignored by Git.
 From the repository root on Windows, run in a Visual Studio Developer shell:
 
 ```powershell
-$trackedIgnored = git ls-files -ci --exclude-standard
-if ($trackedIgnored) {
-  throw "Tracked ignored files remain:`n$($trackedIgnored -join "`n")"
-}
-
-cmake --build build
-ctest --test-dir build --output-on-failure
-.\build\smoke_runner.exe
-.\build\effectiveness_runner.exe
-python -m unittest discover tools\perf_visualizer\tests -p "test_*.py"
-.\build\preprocessor_app.exe --version
-cmake --install build --prefix build\install-check
+python tools\release_smoke.py
 ```
 
 Expected result:
@@ -60,7 +49,8 @@ Expected result:
 - install prefix contains `preprocessor_app`, ONNX Runtime redistributables,
   and `LLMPreprocessorConfig.cmake`.
 
-If Python Playwright is installed locally, also run:
+`tools/release_smoke.py` runs the dashboard browser smoke automatically when
+Python Playwright is installed. To run that check directly:
 
 ```powershell
 python tools\perf_visualizer\tests\validate_dashboard.py `
@@ -71,6 +61,10 @@ python tools\perf_visualizer\tests\validate_dashboard.py `
 Expected result: the dashboard loads, baseline and retrieval diagnostics render,
 `Run effectiveness` creates another sample, charts are nonblank, and the mobile
 viewport has no horizontal overflow.
+
+If browser validation is not available on a release machine, use
+`python tools\release_smoke.py --skip-playwright` and record that exception in
+the release notes.
 
 ## Config And Secret Checklist
 
@@ -98,5 +92,7 @@ The release workflow must pass on Windows, Linux, and macOS:
 - effectiveness runner,
 - visualizer unit tests,
 - optional Playwright dashboard smoke when Python Playwright is available.
+- `tools/release_smoke.py --dry-run --skip-playwright --skip-install`, so the
+  unified gate stays syntactically valid across the matrix.
 
 Do not tag a release if any matrix leg fails.

@@ -76,13 +76,17 @@ unless `--allow-unsafe-remote-dashboard` is supplied.
 GET  /api/health
 GET  /api/config
 GET  /api/latest
+GET  /api/agent-summary
 GET  /api/history?limit=500
 GET  /api/proxy-stats
 POST /api/run-effectiveness
 ```
 
-History is written as NDJSON to the configured `--history-file`. The default
-path lives under `benchmarks/results/`, which is ignored by git.
+`/api/agent-summary` returns a compact status, key metrics, retrieval breakdown,
+and recommendations object for coding agents or automation that need diagnostics
+without scraping the HTML dashboard. History is written as NDJSON to the
+configured `--history-file`. The default path lives under `benchmarks/results/`,
+which is ignored by git.
 
 ## Test The Visualizer
 
@@ -108,13 +112,11 @@ the provided directory.
 From the repository root:
 
 ```powershell
-cmake --build build
-ctest --test-dir build --output-on-failure
-.\build\smoke_runner.exe
-.\build\effectiveness_runner.exe
-python -m unittest discover tools\perf_visualizer\tests
-python tools\perf_visualizer\tests\validate_dashboard.py --effectiveness-exe build\effectiveness_runner.exe
+python tools\release_smoke.py
 ```
+
+Use `python tools\release_smoke.py --skip-playwright` when Python Playwright is
+not installed on the machine running the release gate.
 
 For a local dashboard smoke test:
 

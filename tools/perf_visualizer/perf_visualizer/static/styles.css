@@ -78,6 +78,30 @@ button:hover {
   border-color: var(--teal);
 }
 
+select,
+textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #121619;
+  color: var(--text);
+  font: inherit;
+}
+
+select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+textarea {
+  width: 100%;
+  min-height: 180px;
+  margin-top: 10px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
 .shell {
   width: min(1480px, 100%);
   margin: 0 auto;
@@ -178,6 +202,18 @@ button:hover {
   margin-bottom: 12px;
 }
 
+.panel-control {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.panel-control label {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
 canvas {
   display: block;
   width: 100%;
@@ -230,6 +266,63 @@ canvas {
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.detail-box {
+  min-height: 150px;
+  padding: 10px;
+  border: 1px solid #263038;
+  border-radius: 6px;
+  background: #14191d;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.detail-item {
+  min-width: 0;
+}
+
+.detail-item span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.detail-item strong {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.rank-list {
+  display: grid;
+  gap: 6px;
+}
+
+.rank-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid #263038;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rank-row span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .table-panel {

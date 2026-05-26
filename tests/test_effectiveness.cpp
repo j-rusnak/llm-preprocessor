@@ -141,6 +141,27 @@ bool has_id(const std::vector<std::uint64_t>& ids, std::uint64_t id) {
     return std::find(ids.begin(), ids.end(), id) != ids.end();
 }
 
+std::string normalized_path(std::string path) {
+    std::replace(path.begin(), path.end(), '\\', '/');
+    return path;
+}
+
+bool path_contains_fragment(const std::string& path, const std::string& fragment) {
+    return normalized_path(path).find(fragment) != std::string::npos;
+}
+
+bool find_chunk_by_path_fragment(const preprocessor::RepoIndex& index,
+                                 const std::string& fragment,
+                                 preprocessor::CodeChunk& out) {
+    for (auto chunk : index.snapshot_chunks()) {
+        if (path_contains_fragment(chunk.file_path, fragment)) {
+            out = std::move(chunk);
+            return true;
+        }
+    }
+    return false;
+}
+
 void hydrate_retrieval_chunks(
     preprocessor::RepoIndex& index,
     const std::vector<preprocessor::CodeChunk>& chunks) {
@@ -482,6 +503,46 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
         }
         EXPECT_TRUE(found) << "query=" << c.query << "\nhits:\n" << files;
     }
+}
+
+TEST(Effectiveness_Retrieval, FixtureGraphExpansionLiftsReferencedDefinitionTop3) {
+    const auto root = repo_path("tests/fixtures/retrieval");
+    ASSERT_TRUE(fs::exists(root / "cpp/login_controller.cpp")) << root.string();
+    ASSERT_TRUE(fs::exists(root / "security/signature_verifier.cpp")) << root.string();
+
+    auto index = retrieval_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+    index->attach_symbol_graph(&graph, &extractor);
+    index->index_path(root.string());
+
+    const std::string query = "login controller parse session cookie response";
+    const std::string expected = "security/signature_verifier.cpp";
+    auto has_expected = [&expected](const std::vector<preprocessor::RetrievedChunk>& hits,
+                                    std::size_t top_n) {
+        const std::size_t limit = (std::min)(top_n, hits.size());
+        for (std::size_t i = 0; i < limit; ++i) {
+            if (path_contains_fragment(hits[i].chunk.file_path, expected)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const auto base = index->search(query, 3);
+    ASSERT_FALSE(base.empty()) << query;
+    ASSERT_FALSE(has_expected(base, 3));
+
+    preprocessor::CodeChunk seed;
+    ASSERT_TRUE(find_chunk_by_path_fragment(*index, "cpp/login_controller.cpp", seed));
+    std::vector<preprocessor::RetrievedChunk> seeds{{seed, base.front().score}};
+
+    preprocessor::GraphExpansionConfig cfg;
+    cfg.max_expanded = 2;
+    cfg.query_text = query;
+    const auto expanded = preprocessor::expand_with_graph(seeds, graph, *index, cfg);
+
+    EXPECT_TRUE(has_expected(expanded, 3));
 }
 
 TEST(Effectiveness_Retrieval, PathAndLanguageHintsImproveTop3) {

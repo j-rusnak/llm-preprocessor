@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 
 from perf_visualizer.metrics import (
     append_snapshot,
+    build_agent_summary,
     load_history,
     normalize_effectiveness_report,
     normalize_proxy_stats,
@@ -37,15 +38,21 @@ class MetricsTests(unittest.TestCase):
             "diff_patcher": {"wire_savings_pct": 97.0},
             "bm25_index": {"top3_pct": 100.0, "avg_query_us": 22.5},
             "fixture_retrieval": {
+                "top1_pct": 82.0,
                 "top3_pct": 91.0,
+                "mrr": 0.875,
                 "avg_query_us": 400.0,
+                "graph_lift_queries": 1,
                 "diagnostics": [
                     {
                         "language": "python",
+                        "category": "data",
                         "query": "python baseline comparison",
                         "expected": "python/baseline_compare.py",
                         "expected_rank": 2,
+                        "top1_hit": False,
                         "top3_hit": True,
+                        "reciprocal_rank": 0.5,
                         "query_us": 125.0,
                         "top_k": [
                             {"rank": 1, "path": "python/ingest_pipeline.py", "score": 0.7},
@@ -57,14 +64,29 @@ class MetricsTests(unittest.TestCase):
                 "by_language": {
                     "python": {
                         "queries": 2,
+                        "top1_correct": 1,
                         "top3_correct": 2,
+                        "top1_pct": 50.0,
                         "top3_pct": 100.0,
+                        "mrr": 0.75,
+                        "avg_query_us": 150.0,
+                    }
+                },
+                "by_category": {
+                    "data": {
+                        "queries": 2,
+                        "top1_correct": 1,
+                        "top3_correct": 2,
+                        "top1_pct": 50.0,
+                        "top3_pct": 100.0,
+                        "mrr": 0.75,
                         "avg_query_us": 150.0,
                     }
                 },
                 "slowest_queries": [
                     {
                         "language": "python",
+                        "category": "data",
                         "query": "python baseline comparison",
                         "query_us": 125.0,
                         "expected_rank": 2,
@@ -82,6 +104,9 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(snapshot["series"]["prompt_cache_speedup_x"], 3.5)
         self.assertEqual(snapshot["series"]["embedding_cache_speedup_x"], 8.0)
         self.assertEqual(snapshot["series"]["fixture_top3_pct"], 91.0)
+        self.assertEqual(snapshot["series"]["fixture_top1_pct"], 82.0)
+        self.assertEqual(snapshot["series"]["fixture_mrr"], 0.875)
+        self.assertEqual(snapshot["series"]["retrieval_graph_lift_queries"], 1)
         self.assertEqual(snapshot["series"]["context_budget_used_pct"], 60.0)
         self.assertEqual(snapshot["series"]["retrieval_queries"], 2)
         self.assertEqual(snapshot["series"]["retrieval_near_misses"], 0)
@@ -91,7 +116,14 @@ class MetricsTests(unittest.TestCase):
             "python/baseline_compare.py",
         )
         self.assertEqual(snapshot["raw_summary"]["retrieval_by_language"]["python"]["queries"], 2)
+        self.assertEqual(snapshot["raw_summary"]["retrieval_by_category"]["data"]["mrr"], 0.75)
         self.assertEqual(snapshot["raw_summary"]["retrieval_slowest_queries"][0]["query_us"], 125.0)
+
+        summary = build_agent_summary(snapshot)
+        self.assertEqual(summary["status"], "attention")
+        self.assertEqual(summary["key_metrics"]["fixture_mrr"], 0.875)
+        self.assertEqual(summary["retrieval"]["by_category"]["data"]["queries"], 2)
+        self.assertTrue(any("retrieval" in item.lower() for item in summary["recommendations"]))
 
     def test_proxy_stats_compute_live_rates_and_deltas(self):
         previous = {

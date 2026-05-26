@@ -88,13 +88,21 @@ def main() -> int:
                 )
                 page.on("pageerror", lambda exc: console_events.append({"type": "pageerror", "text": str(exc)}))
                 page.goto(url, wait_until="networkidle")
+                agent_summary = page.request.get(f"{url}api/agent-summary").json()
+                if agent_summary.get("summary", {}).get("status") not in {"ok", "attention"}:
+                    raise AssertionError(f"unexpected agent summary: {agent_summary}")
 
                 expect(page.get_by_role("heading", name="Performance Console")).to_be_visible()
                 expect(page.get_by_role("heading", name="Baseline Comparison")).to_be_visible()
                 expect(page.get_by_role("heading", name="Retrieval Diagnostics")).to_be_visible()
                 expect(page.get_by_role("heading", name="Slowest Queries")).to_be_visible()
+                expect(page.get_by_label("Baseline sample")).to_be_visible()
+                expect(page.get_by_label("Retrieval query")).to_be_visible()
+                expect(page.get_by_role("button", name="Export Markdown report")).to_be_visible()
+                expect(page.get_by_role("button", name="Export JSON report")).to_be_visible()
                 expect(page.locator("#languageRows .insight-row").first).to_be_visible()
                 expect(page.locator("#diagnosticRows .insight-row").first).to_be_visible()
+                expect(page.locator("#diagnosticDetail")).to_contain_text("Expected")
                 expect(page.locator("#nearMissRows")).to_contain_text("No near misses")
 
                 before = page.evaluate(
@@ -111,6 +119,12 @@ def main() -> int:
                     timeout=30000,
                 )
                 expect(page.locator("#baselineRows .insight-row").first).to_be_visible()
+                page.get_by_role("button", name="Export Markdown report").click()
+                if "# LLM Preprocessor Performance Report" not in page.locator("#exportOutput").input_value():
+                    raise AssertionError("markdown report export was not rendered")
+                page.get_by_role("button", name="Export JSON report").click()
+                if '"snapshots"' not in page.locator("#exportOutput").input_value():
+                    raise AssertionError("json report export was not rendered")
 
                 canvas_state = page.evaluate(
                     """() => [...document.querySelectorAll('canvas')].map((canvas) => {

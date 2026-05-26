@@ -58,6 +58,10 @@ jobs:
             Write-Error "Tracked ignored files must be removed from the Git index:`n$($trackedIgnored -join "`n")"
           }
 
+      - name: Release smoke script dry run
+        shell: pwsh
+        run: python tools/release_smoke.py --dry-run --skip-playwright --skip-install
+
       - name: Download ONNX Runtime
         shell: pwsh
         run: |

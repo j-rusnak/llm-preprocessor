@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .collector import collect_effectiveness_snapshot, collect_proxy_snapshot
-from .metrics import append_snapshot, load_history
+from .metrics import append_snapshot, build_agent_summary, load_history
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
@@ -55,6 +55,13 @@ class PerfState:
     def latest(self) -> dict[str, Any] | None:
         with self._lock:
             return self._history[-1] if self._history else None
+
+    def latest_effectiveness(self) -> dict[str, Any] | None:
+        with self._lock:
+            for snapshot in reversed(self._history):
+                if snapshot.get("kind") == "effectiveness":
+                    return snapshot
+        return None
 
     def append(self, snapshot: dict[str, Any]) -> None:
         with self._lock:
@@ -144,6 +151,9 @@ def make_handler(state: PerfState):
                 return
             if parsed.path == "/api/latest":
                 self._json({"snapshot": state.latest()})
+                return
+            if parsed.path == "/api/agent-summary":
+                self._json({"summary": build_agent_summary(state.latest_effectiveness() or state.latest())})
                 return
             if parsed.path == "/api/proxy-stats":
                 try:
