@@ -34,6 +34,7 @@ Expected:
 | `ctest` | `100% tests passed, 0 tests failed` |
 | `smoke_runner.exe` | `Summary: 53 passed, 0 failed.` |
 | `effectiveness_runner.exe` | Exit 0, summary table on stderr, JSON on stdout |
+| Visualizer unit tests | `python -m unittest discover tools\perf_visualizer\tests -p "test_*.py"` passes |
 
 ---
 
@@ -210,10 +211,15 @@ Stderr prints a human-readable summary table:
   "bm25":                { "docs": 17, "queries": 8, "top1": 1.0, "top3": 1.0, "us_per_query": 37.7 },
   "graph_retrieval":     { "seed_count": 2, "expanded_count": 3,
                            "top3_lift": true, "unrelated_pollution": false },
-  "fixture_retrieval":   { "files": 11, "queries": 11, "top3_pct": 100.0,
-                           "by_language": {"cpp": {"top3_hit": true},
-                                           "yaml": {"top3_hit": true},
-                                           "sql": {"top3_hit": true}} },
+  "fixture_retrieval":   { "files": 22, "queries": 22, "top3_pct": 100.0,
+                           "by_language": {"cpp": {"queries": 2,
+                                                    "top3_pct": 100.0}},
+                           "diagnostics": [{"language": "cpp",
+                                             "expected": "cpp/openai_proxy_slice.cpp",
+                                             "expected_rank": 2,
+                                             "top_k": []}],
+                           "near_misses": [],
+                           "slowest_queries": [] },
   "model_router":        { "cases": 4, "correct": 4, "accuracy": 1.0, "us_per_route": 0.57 },
   "ab_harness":          { "assigns": 10000, "counts": {"A":2496,"B":2502,"C":5002},
                            "chi_squared": 0.01, "sticky_ok": 100 },

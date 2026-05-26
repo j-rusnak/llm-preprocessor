@@ -65,6 +65,17 @@ def normalize_effectiveness_report(
     context_budget = _get(report, ("context_packing", "budget_chars"))
     graph_top3_lift = _get(report, ("graph_retrieval", "top3_lift"))
     graph_pollution = _get(report, ("graph_retrieval", "unrelated_pollution"))
+    fixture = report.get("fixture_retrieval", {})
+    diagnostics = fixture.get("diagnostics", []) if isinstance(fixture, dict) else []
+    near_misses = fixture.get("near_misses", []) if isinstance(fixture, dict) else []
+    slowest_queries = fixture.get("slowest_queries", []) if isinstance(fixture, dict) else []
+    by_language = fixture.get("by_language", {}) if isinstance(fixture, dict) else {}
+    fixture_queries = _get(report, ("fixture_retrieval", "queries"))
+    if fixture_queries <= 0 and isinstance(by_language, dict):
+        fixture_queries = sum(
+            _number(bucket.get("queries")) for bucket in by_language.values()
+            if isinstance(bucket, dict)
+        )
 
     series = {
         "prompt_cache_speedup_x": _rounded(_get(report, ("prompt_cache", "speedup_x"))),
@@ -84,6 +95,14 @@ def normalize_effectiveness_report(
         "context_deduped_chunks": _rounded(_get(report, ("context_packing", "deduped_chunks"))),
         "graph_top3_lift": _rounded(graph_top3_lift),
         "graph_pollution_guard": _rounded(1.0 - graph_pollution),
+        "retrieval_queries": _rounded(fixture_queries),
+        "retrieval_near_misses": _rounded(float(len(near_misses))),
+        "retrieval_slowest_query_us": _rounded(
+            _number(slowest_queries[0].get("query_us")) if slowest_queries else 0.0
+        ),
+        "retrieval_graph_expanded_queries": _rounded(
+            _get(report, ("fixture_retrieval", "graph_expanded_queries"))
+        ),
     }
 
     cards = [
@@ -99,6 +118,8 @@ def normalize_effectiveness_report(
               "Packed context characters divided by configured budget."),
         _card("diff_wire_savings_pct", "Diff wire savings", series["diff_wire_savings_pct"], "%", "efficiency",
               "Unified diff payload size reduction vs full-file transport."),
+        _card("retrieval_queries", "Retrieval queries", series["retrieval_queries"], "", "retrieval",
+              "Fixture queries evaluated in the latest effectiveness run."),
     ]
 
     return {
@@ -108,7 +129,11 @@ def normalize_effectiveness_report(
         "series": series,
         "cards": cards,
         "raw_summary": {
-            "fixture_by_language": report.get("fixture_retrieval", {}).get("by_language", {}),
+            "fixture_by_language": by_language,
+            "retrieval_by_language": by_language,
+            "retrieval_diagnostics": diagnostics,
+            "retrieval_near_misses": near_misses,
+            "retrieval_slowest_queries": slowest_queries,
             "cache_key_stable": report.get("context_packing", {}).get(
                 "cache_key_stable_when_omitted_differs", False
             ),

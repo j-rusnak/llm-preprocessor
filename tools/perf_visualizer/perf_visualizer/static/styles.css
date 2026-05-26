@@ -86,7 +86,8 @@ button:hover {
 
 .status-row,
 .cards,
-.chart-grid {
+.chart-grid,
+.diagnostic-grid {
   display: grid;
   gap: 14px;
 }
@@ -159,6 +160,11 @@ button:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.diagnostic-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
 .panel {
   padding: 14px;
   min-width: 0;
@@ -179,6 +185,51 @@ canvas {
   background: #121619;
   border: 1px solid #242b31;
   border-radius: 6px;
+}
+
+.insight-list {
+  display: grid;
+  gap: 8px;
+}
+
+.insight-row {
+  display: grid;
+  gap: 4px;
+  min-height: 54px;
+  padding: 10px;
+  border: 1px solid #263038;
+  border-radius: 6px;
+  background: #14191d;
+}
+
+.insight-row .row-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.insight-row strong,
+.insight-row span {
+  min-width: 0;
+}
+
+.insight-row .row-title {
+  overflow-wrap: anywhere;
+}
+
+.insight-row .row-value {
+  flex: 0 0 auto;
+  color: var(--teal);
+  font-weight: 700;
+}
+
+.insight-row .row-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .table-panel {
@@ -218,7 +269,14 @@ th {
 
   .status-row,
   .cards,
-  .chart-grid {
+  .chart-grid,
+  .diagnostic-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1280px) and (min-width: 961px) {
+  .diagnostic-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

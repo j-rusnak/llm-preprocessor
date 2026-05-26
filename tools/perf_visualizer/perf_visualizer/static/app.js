@@ -35,6 +35,16 @@ function fmt(value, unit = "") {
   return `${rendered}${unit}`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  }[ch]));
+}
+
 function timeLabel(ms) {
   if (!ms) return "n/a";
   return new Date(ms).toLocaleTimeString();
@@ -78,11 +88,11 @@ async function runEffectiveness() {
 
 function latestCards() {
   const cards = [];
-  for (let i = state.snapshots.length - 1; i >= 0 && cards.length < 6; --i) {
+  for (let i = state.snapshots.length - 1; i >= 0 && cards.length < 7; --i) {
     const snapshot = state.snapshots[i];
     for (const card of snapshot.cards || []) {
       if (!cards.find((existing) => existing.id === card.id)) cards.push(card);
-      if (cards.length >= 6) break;
+      if (cards.length >= 7) break;
     }
   }
   return cards;
@@ -92,10 +102,10 @@ function renderCards() {
   const root = document.getElementById("cards");
   const cards = latestCards();
   root.innerHTML = cards.map((card) => `
-    <article class="metric-card ${card.group}">
-      <div class="label">${card.label}</div>
+    <article class="metric-card ${escapeHtml(card.group)}">
+      <div class="label">${escapeHtml(card.label)}</div>
       <div class="value">${fmt(card.value, card.unit)}</div>
-      <div class="desc">${card.description}</div>
+      <div class="desc">${escapeHtml(card.description)}</div>
     </article>
   `).join("");
 }
@@ -186,7 +196,7 @@ function renderTable() {
     return `
       <tr>
         <td>${timeLabel(snapshot.timestamp_ms)}</td>
-        <td>${snapshot.kind}</td>
+        <td>${escapeHtml(snapshot.kind)}</td>
         <td>${fmt(series.token_reduction_pct ?? series.token_savings_pct, "%")}</td>
         <td>${fmt(series.fixture_top3_pct, "%")}</td>
         <td>${fmt(series.prompt_cache_speedup_x ?? series.cache_hit_rate_pct, series.prompt_cache_speedup_x ? "x" : "%")}</td>
@@ -194,6 +204,154 @@ function renderTable() {
       </tr>
     `;
   }).join("");
+}
+
+function latestEffectiveness() {
+  for (let i = state.snapshots.length - 1; i >= 0; --i) {
+    if (state.snapshots[i].kind === "effectiveness") return state.snapshots[i];
+  }
+  return null;
+}
+
+function baselineFor(snapshot) {
+  if (!snapshot) return null;
+  return state.snapshots.find((candidate) =>
+    candidate.kind === snapshot.kind && candidate.timestamp_ms !== snapshot.timestamp_ms);
+}
+
+function seriesValue(snapshot, key) {
+  return snapshot && snapshot.series ? snapshot.series[key] : undefined;
+}
+
+function renderEmpty(root, message) {
+  root.innerHTML = `
+    <div class="insight-row">
+      <div class="row-main">
+        <strong class="row-title">${escapeHtml(message)}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function renderBaseline() {
+  const root = document.getElementById("baselineRows");
+  const latest = latestEffectiveness();
+  if (!latest) {
+    renderEmpty(root, "No effectiveness sample yet");
+    return;
+  }
+  const baseline = baselineFor(latest);
+  if (!baseline) {
+    renderEmpty(root, "Run another effectiveness sample to compare");
+    return;
+  }
+
+  const metrics = [
+    ["fixture_top3_pct", "Retrieval top-3", "%"],
+    ["fixture_avg_query_us", "Retrieval latency", " us"],
+    ["token_reduction_pct", "Token reduction", "%"],
+    ["embedding_cache_speedup_x", "Embedding cache", "x"],
+    ["context_budget_used_pct", "Context budget", "%"],
+  ];
+  const rows = metrics
+    .map(([key, label, unit]) => {
+      const latestValue = Number(seriesValue(latest, key));
+      const baselineValue = Number(seriesValue(baseline, key));
+      if (!Number.isFinite(latestValue) || !Number.isFinite(baselineValue)) return "";
+      const delta = latestValue - baselineValue;
+      const sign = delta > 0 ? "+" : "";
+      return `
+        <div class="insight-row">
+          <div class="row-main">
+            <strong class="row-title">${escapeHtml(label)}</strong>
+            <span class="row-value">${fmt(latestValue, unit)}</span>
+          </div>
+          <div class="row-meta">baseline ${fmt(baselineValue, unit)} | delta ${sign}${fmt(delta, unit)}</div>
+        </div>
+      `;
+    })
+    .filter(Boolean);
+  root.innerHTML = rows.join("") || "";
+}
+
+function latestRetrievalSummary() {
+  const latest = latestEffectiveness();
+  return latest && latest.raw_summary ? latest.raw_summary : {};
+}
+
+function normalizeLanguageBucket(bucket) {
+  if (!bucket || typeof bucket !== "object") {
+    return { queries: 0, top3: 0, top3Pct: 0, avgUs: 0 };
+  }
+  if (bucket.queries !== undefined) {
+    return {
+      queries: Number(bucket.queries) || 0,
+      top3: Number(bucket.top3_correct) || 0,
+      top3Pct: Number(bucket.top3_pct) || 0,
+      avgUs: Number(bucket.avg_query_us) || 0,
+    };
+  }
+  const hit = bucket.top3_hit ? 1 : 0;
+  return { queries: 1, top3: hit, top3Pct: hit ? 100 : 0, avgUs: 0 };
+}
+
+function renderLanguageDiagnostics() {
+  const root = document.getElementById("languageRows");
+  const summary = latestRetrievalSummary();
+  const byLanguage = summary.retrieval_by_language || summary.fixture_by_language || {};
+  const rows = Object.keys(byLanguage).sort().map((language) => {
+    const bucket = normalizeLanguageBucket(byLanguage[language]);
+    return `
+      <div class="insight-row">
+        <div class="row-main">
+          <strong class="row-title">${escapeHtml(language)}</strong>
+          <span class="row-value">${fmt(bucket.top3Pct, "%")}</span>
+        </div>
+        <div class="row-meta">${fmt(bucket.top3)}/${fmt(bucket.queries)} top-3 | avg ${fmt(bucket.avgUs, " us")}</div>
+      </div>
+    `;
+  });
+  if (!rows.length) {
+    renderEmpty(root, "No retrieval diagnostics yet");
+    return;
+  }
+  root.innerHTML = rows.join("");
+}
+
+function renderSlowestQueries() {
+  const root = document.getElementById("diagnosticRows");
+  const rows = (latestRetrievalSummary().retrieval_slowest_queries || []).slice(0, 5).map((item) => `
+    <div class="insight-row">
+      <div class="row-main">
+        <strong class="row-title">${escapeHtml(item.language || "query")}</strong>
+        <span class="row-value">${fmt(item.query_us, " us")}</span>
+      </div>
+      <div class="row-meta">${escapeHtml(item.expected || "")} | rank ${escapeHtml(item.expected_rank ?? "miss")}</div>
+    </div>
+  `);
+  if (!rows.length) {
+    renderEmpty(root, "No query timing yet");
+    return;
+  }
+  root.innerHTML = rows.join("");
+}
+
+function renderNearMisses() {
+  const root = document.getElementById("nearMissRows");
+  const rows = (latestRetrievalSummary().retrieval_near_misses || []).slice(0, 5).map((item) => `
+    <div class="insight-row">
+      <div class="row-main">
+        <strong class="row-title">${escapeHtml(item.language || "query")}</strong>
+        <span class="row-value">miss</span>
+      </div>
+      <div class="row-meta">${escapeHtml(item.expected || "")}</div>
+    </div>
+  `);
+  if (!rows.length) {
+    renderEmpty(root, "No near misses");
+    return;
+  }
+  root.innerHTML = rows.join("");
 }
 
 function render() {
@@ -204,6 +362,10 @@ function render() {
     : "None";
   renderCards();
   Object.entries(chartSpecs).forEach(([canvasId, spec]) => drawChart(canvasId, spec));
+  renderBaseline();
+  renderLanguageDiagnostics();
+  renderSlowestQueries();
+  renderNearMisses();
   renderTable();
 }
 

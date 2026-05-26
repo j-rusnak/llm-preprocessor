@@ -138,3 +138,18 @@ jobs:
       - name: Effectiveness runner
         shell: pwsh
         run: "& '${{ matrix.effectiveness_path }}'"
+
+      - name: Visualizer unit tests
+        shell: pwsh
+        run: python -m unittest discover tools/perf_visualizer/tests -p "test_*.py"
+
+      - name: Visualizer Playwright smoke
+        shell: pwsh
+        run: |
+          $hasPlaywright = python -c "import importlib.util; print('yes' if importlib.util.find_spec('playwright') else 'no')"
+          if ($hasPlaywright.Trim() -ne "yes") {
+            Write-Host "Python Playwright is not installed; skipping dashboard browser smoke."
+            exit 0
+          }
+          python tools/perf_visualizer/tests/validate_dashboard.py `
+            --effectiveness-exe "${{ matrix.effectiveness_path }}"

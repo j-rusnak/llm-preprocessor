@@ -36,7 +36,42 @@ class MetricsTests(unittest.TestCase):
             "embedding_cache": {"speedup_x": 8.0},
             "diff_patcher": {"wire_savings_pct": 97.0},
             "bm25_index": {"top3_pct": 100.0, "avg_query_us": 22.5},
-            "fixture_retrieval": {"top3_pct": 91.0, "avg_query_us": 400.0},
+            "fixture_retrieval": {
+                "top3_pct": 91.0,
+                "avg_query_us": 400.0,
+                "diagnostics": [
+                    {
+                        "language": "python",
+                        "query": "python baseline comparison",
+                        "expected": "python/baseline_compare.py",
+                        "expected_rank": 2,
+                        "top3_hit": True,
+                        "query_us": 125.0,
+                        "top_k": [
+                            {"rank": 1, "path": "python/ingest_pipeline.py", "score": 0.7},
+                            {"rank": 2, "path": "python/baseline_compare.py", "score": 0.6},
+                        ],
+                        "graph_expanded_count": 1,
+                    }
+                ],
+                "by_language": {
+                    "python": {
+                        "queries": 2,
+                        "top3_correct": 2,
+                        "top3_pct": 100.0,
+                        "avg_query_us": 150.0,
+                    }
+                },
+                "slowest_queries": [
+                    {
+                        "language": "python",
+                        "query": "python baseline comparison",
+                        "query_us": 125.0,
+                        "expected_rank": 2,
+                    }
+                ],
+                "near_misses": [],
+            },
             "graph_retrieval": {"top3_lift": True, "unrelated_pollution": False},
         }
 
@@ -48,7 +83,15 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(snapshot["series"]["embedding_cache_speedup_x"], 8.0)
         self.assertEqual(snapshot["series"]["fixture_top3_pct"], 91.0)
         self.assertEqual(snapshot["series"]["context_budget_used_pct"], 60.0)
+        self.assertEqual(snapshot["series"]["retrieval_queries"], 2)
+        self.assertEqual(snapshot["series"]["retrieval_near_misses"], 0)
         self.assertTrue(any(card["id"] == "token_reduction_pct" for card in snapshot["cards"]))
+        self.assertEqual(
+            snapshot["raw_summary"]["retrieval_diagnostics"][0]["expected"],
+            "python/baseline_compare.py",
+        )
+        self.assertEqual(snapshot["raw_summary"]["retrieval_by_language"]["python"]["queries"], 2)
+        self.assertEqual(snapshot["raw_summary"]["retrieval_slowest_queries"][0]["query_us"], 125.0)
 
     def test_proxy_stats_compute_live_rates_and_deltas(self):
         previous = {

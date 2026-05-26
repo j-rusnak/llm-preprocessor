@@ -44,6 +44,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 .\build\smoke_runner.exe
 .\build\effectiveness_runner.exe
+python -m unittest discover tools\perf_visualizer\tests -p "test_*.py"
 .\build\preprocessor_app.exe --version
 cmake --install build --prefix build\install-check
 ```
@@ -54,9 +55,22 @@ Expected result:
 - all CTest cases pass,
 - smoke runner reports zero failures,
 - effectiveness runner exits 0,
+- visualizer unit tests pass,
 - `--version` reports project version, build config, and commit,
 - install prefix contains `preprocessor_app`, ONNX Runtime redistributables,
   and `LLMPreprocessorConfig.cmake`.
+
+If Python Playwright is installed locally, also run:
+
+```powershell
+python tools\perf_visualizer\tests\validate_dashboard.py `
+  --effectiveness-exe build\effectiveness_runner.exe `
+  --screenshot-dir benchmarks\results\dashboard-validation
+```
+
+Expected result: the dashboard loads, baseline and retrieval diagnostics render,
+`Run effectiveness` creates another sample, charts are nonblank, and the mobile
+viewport has no horizontal overflow.
 
 ## Config And Secret Checklist
 
@@ -81,6 +95,8 @@ The release workflow must pass on Windows, Linux, and macOS:
 - install smoke check,
 - CTest,
 - smoke runner,
-- effectiveness runner.
+- effectiveness runner,
+- visualizer unit tests,
+- optional Playwright dashboard smoke when Python Playwright is available.
 
 Do not tag a release if any matrix leg fails.
