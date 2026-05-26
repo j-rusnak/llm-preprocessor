@@ -247,7 +247,9 @@ ctest --test-dir build --output-on-failure
 The smoke runner exercises the local middleware pipeline without requiring the
 ONNX model. The effectiveness runner emits JSON to stdout and a summary table
 to stderr for cache speedup, context packing, compression, retrieval quality,
-model routing, auth throughput, and rate limiting.
+model routing, auth throughput, and rate limiting. Retrieval effectiveness also
+includes per-language diagnostics, expected-file rank, slowest fixture queries,
+near misses, and graph-expansion counts for dashboard analysis.
 
 To visualize those gains over time, run the standalone dashboard:
 
@@ -260,6 +262,14 @@ python tools\perf_visualizer\run_dashboard.py `
 
 See [tools/perf_visualizer/README.md](tools/perf_visualizer/README.md) for live
 proxy `/stats` polling and full-program test commands.
+
+Optional browser validation for the dashboard uses Python Playwright:
+
+```powershell
+python tools\perf_visualizer\tests\validate_dashboard.py `
+  --effectiveness-exe build\effectiveness_runner.exe `
+  --screenshot-dir benchmarks\results\dashboard-validation
+```
 
 See [docs/TESTING.md](docs/TESTING.md) for the full feature usage guide and
 [docs/RELEASE.md](docs/RELEASE.md) for the release checklist.

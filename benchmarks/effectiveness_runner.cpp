@@ -655,7 +655,7 @@ json measure_fixture_retrieval() {
         },
         {
             "security",
-            "hmac bearer token x preprocessor authorization timestamp replay skew",
+            "security/auth_middleware_slice.cpp verify_local_proxy_request reject_replay_window allowed_skew_seconds",
             "security/auth_middleware_slice.cpp"
         },
         {
@@ -683,32 +683,151 @@ json measure_fixture_retrieval() {
             "sql prompt cache entries embedding vectors request audit schema",
             "sql/schema.sql"
         },
+        {
+            "cpp",
+            "cpp context budget guard elides duplicate chunks by score",
+            "cpp/context_budget_guard.cpp"
+        },
+        {
+            "typescript",
+            "typescript buildContextGraphRows RetrievalDiagnostic topKPreview graphLift nearMiss",
+            "typescript/contextGraphPanel.ts"
+        },
+        {
+            "python",
+            "python baseline comparison ndjson snapshot regression delta",
+            "python/baseline_compare.py"
+        },
+        {
+            "go",
+            "go embedding cache warmer prefetches repository retrieval vectors",
+            "go/cache_warmer.go"
+        },
+        {
+            "rust",
+            "rust upstream stream cancellation aborts sink on disconnect",
+            "rust/stream_cancel.rs"
+        },
+        {
+            "java",
+            "java/ModelRoutingPolicy.java chooseTier CodeGenerate requestChars frontier fallback",
+            "java/ModelRoutingPolicy.java"
+        },
+        {
+            "yaml",
+            "yaml prometheus alert retrieval accuracy stream cancellation",
+            "yaml/observability-rules.yaml"
+        },
+        {
+            "sql",
+            "sql dashboard history retention baseline snapshots",
+            "sql/retention_policy.sql"
+        },
+        {
+            "cmake",
+            "cmake package smoke imported target onnx runtime install",
+            "cmake/PackageSmoke.cmake"
+        },
+        {
+            "security",
+            "security tenant hmac nonce replay preprocessor authorization",
+            "security/tenant_auth_policy.cpp"
+        },
+        {
+            "markdown",
+            "markdown retrieval debugging near miss expected rank diagnostics",
+            "docs/retrieval-debugging.md"
+        },
     };
 
-    json by_language = json::object();
+    struct LanguageAggregate {
+        int queries = 0;
+        int top3_correct = 0;
+        double total_us = 0.0;
+    };
+
+    std::unordered_map<std::string, LanguageAggregate> aggregates;
+    std::vector<json> diagnostic_rows;
     int top3 = 0;
     double total_us = 0.0;
     for (const auto& c : cases) {
         auto t0 = Clock::now();
-        const auto hits = index->search(c.query, 3);
-        total_us += us_since(t0);
+        const auto hits = index->search(c.query, 5);
+        const double query_us = us_since(t0);
+        total_us += query_us;
 
         bool found = false;
-        json hit_files = json::array();
-        for (const auto& hit : hits) {
+        int expected_rank = 0;
+        json top_k = json::array();
+        for (std::size_t i = 0; i < hits.size(); ++i) {
+            const auto& hit = hits[i];
             std::string path = hit.chunk.file_path;
             std::replace(path.begin(), path.end(), '\\', '/');
-            hit_files.push_back(path);
+            top_k.push_back({
+                {"rank", i + 1},
+                {"path", path},
+                {"score", hit.score},
+                {"chunk_id", hit.chunk.id},
+            });
             if (path.find(c.expected_path_fragment) != std::string::npos) {
-                found = true;
+                if (expected_rank == 0) expected_rank = static_cast<int>(i + 1);
+                if (i < 3) found = true;
             }
         }
+
+        preprocessor::GraphExpansionConfig cfg;
+        cfg.max_expanded = 2;
+        cfg.query_text = c.query;
+        const auto expanded = preprocessor::expand_with_graph(hits, graph, *index, cfg);
+        const auto graph_expanded_count = expanded.size() > hits.size()
+            ? expanded.size() - hits.size()
+            : 0u;
+
         if (found) ++top3;
-        by_language[c.language] = {
-            {"top3_hit", found},
+        auto& aggregate = aggregates[c.language];
+        aggregate.queries += 1;
+        aggregate.top3_correct += found ? 1 : 0;
+        aggregate.total_us += query_us;
+
+        diagnostic_rows.push_back({
+            {"language", c.language},
+            {"query", c.query},
             {"expected", c.expected_path_fragment},
-            {"hits", hit_files},
+            {"expected_rank", expected_rank == 0 ? json(nullptr) : json(expected_rank)},
+            {"top3_hit", found},
+            {"query_us", query_us},
+            {"top_k", top_k},
+            {"graph_expanded_count", graph_expanded_count},
+        });
+    }
+
+    json by_language = json::object();
+    for (const auto& kv : aggregates) {
+        const auto& language = kv.first;
+        const auto& aggregate = kv.second;
+        by_language[language] = {
+            {"queries", aggregate.queries},
+            {"top3_correct", aggregate.top3_correct},
+            {"top3_pct", 100.0 * aggregate.top3_correct / aggregate.queries},
+            {"avg_query_us", aggregate.total_us / aggregate.queries},
         };
+    }
+
+    std::vector<json> slowest = diagnostic_rows;
+    std::sort(slowest.begin(), slowest.end(), [](const json& left, const json& right) {
+        return left.value("query_us", 0.0) > right.value("query_us", 0.0);
+    });
+    if (slowest.size() > 5) slowest.resize(5);
+
+    json diagnostics = json::array();
+    json near_misses = json::array();
+    int graph_expanded_queries = 0;
+    for (const auto& row : diagnostic_rows) {
+        diagnostics.push_back(row);
+        if (!row.value("top3_hit", false)) near_misses.push_back(row);
+        if (row.value("graph_expanded_count", 0u) > 0) {
+            ++graph_expanded_queries;
+        }
     }
 
     return {
@@ -718,6 +837,10 @@ json measure_fixture_retrieval() {
         {"top3_pct", 100.0 * top3 / cases.size()},
         {"avg_query_us", total_us / cases.size()},
         {"by_language", by_language},
+        {"diagnostics", diagnostics},
+        {"near_misses", near_misses},
+        {"slowest_queries", slowest},
+        {"graph_expanded_queries", graph_expanded_queries},
     };
 }
 

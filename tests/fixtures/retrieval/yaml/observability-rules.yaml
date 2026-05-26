@@ -1,0 +1,15 @@
+groups:
+  - name: llm-preprocessor.rules
+    rules:
+      - alert: RetrievalAccuracyDrop
+        expr: fixture_top3_pct < 95
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Retrieval accuracy dropped below release threshold
+      - alert: StreamCancellationSpike
+        expr: increase(stream_cancellations_total[5m]) > 20
+        for: 5m
+        labels:
+          severity: info

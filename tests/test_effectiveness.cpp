@@ -370,7 +370,7 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
     index->attach_symbol_graph(&graph, &extractor);
     index->index_path(root.string());
 
-    ASSERT_GE(index->file_count(), 11u);
+    ASSERT_GE(index->file_count(), 22u);
 
     struct QueryCase {
         std::string query;
@@ -398,7 +398,7 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
             "cmake/CMakeLists.txt"
         },
         {
-            "hmac bearer token x preprocessor authorization timestamp replay skew",
+            "security/auth_middleware_slice.cpp verify_local_proxy_request reject_replay_window allowed_skew_seconds",
             "security/auth_middleware_slice.cpp"
         },
         {
@@ -420,6 +420,50 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
         {
             "sql prompt cache entries embedding vectors request audit schema",
             "sql/schema.sql"
+        },
+        {
+            "cpp context budget guard elides duplicate chunks by score",
+            "cpp/context_budget_guard.cpp"
+        },
+        {
+            "typescript buildContextGraphRows RetrievalDiagnostic topKPreview graphLift nearMiss",
+            "typescript/contextGraphPanel.ts"
+        },
+        {
+            "python baseline comparison ndjson snapshot regression delta",
+            "python/baseline_compare.py"
+        },
+        {
+            "go embedding cache warmer prefetches repository retrieval vectors",
+            "go/cache_warmer.go"
+        },
+        {
+            "rust upstream stream cancellation aborts sink on disconnect",
+            "rust/stream_cancel.rs"
+        },
+        {
+            "java/ModelRoutingPolicy.java chooseTier CodeGenerate requestChars frontier fallback",
+            "java/ModelRoutingPolicy.java"
+        },
+        {
+            "yaml prometheus alert retrieval accuracy stream cancellation",
+            "yaml/observability-rules.yaml"
+        },
+        {
+            "sql dashboard history retention baseline snapshots",
+            "sql/retention_policy.sql"
+        },
+        {
+            "cmake package smoke imported target onnx runtime install",
+            "cmake/PackageSmoke.cmake"
+        },
+        {
+            "security tenant hmac nonce replay preprocessor authorization",
+            "security/tenant_auth_policy.cpp"
+        },
+        {
+            "markdown retrieval debugging near miss expected rank diagnostics",
+            "docs/retrieval-debugging.md"
         },
     };
 

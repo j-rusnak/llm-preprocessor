@@ -67,6 +67,37 @@
         </article>
       </section>
 
+      <section class="diagnostic-grid" aria-label="Retrieval and baseline diagnostics">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Baseline Comparison</h2>
+            <span>latest vs first matching sample</span>
+          </div>
+          <div id="baselineRows" class="insight-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Retrieval Diagnostics</h2>
+            <span>per-language top-3 quality</span>
+          </div>
+          <div id="languageRows" class="insight-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Slowest Queries</h2>
+            <span>retrieval latency leaders</span>
+          </div>
+          <div id="diagnosticRows" class="insight-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Near Misses</h2>
+            <span>expected file outside top-3</span>
+          </div>
+          <div id="nearMissRows" class="insight-list"></div>
+        </article>
+      </section>
+
       <section class="panel table-panel">
         <div class="panel-head">
           <h2>Recent Samples</h2>

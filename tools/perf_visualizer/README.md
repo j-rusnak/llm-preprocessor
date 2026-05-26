@@ -1,14 +1,19 @@
 # Performance Visualizer
 
 Standalone local dashboard for watching `llm-preprocessor` performance in real
-time. It is intentionally outside the C++ build and uses only the Python
-standard library plus browser-native HTML/CSS/JavaScript.
+time. Runtime serving is intentionally outside the C++ build and uses only the
+Python standard library plus browser-native HTML/CSS/JavaScript. Browser smoke
+testing is optional and uses Python Playwright when it is installed.
 
 ## What It Shows
 
 - Context packing: included/omitted/deduped chunks and budget usage.
 - Memory reuse: prompt-cache and embedding-cache speedup.
 - Retrieval quality: BM25 and multi-language fixture top-3 accuracy.
+- Retrieval diagnostics: per-language accuracy, expected rank, slowest fixture
+  queries, near misses, and graph-expansion counts.
+- Baseline comparison: latest effectiveness sample compared with the first
+  matching sample in the current history file.
 - LLM efficiency: prompt rewriting token reduction, diff wire savings, live
   cache hit rate, upstream avoidance, and token-savings counters from `/stats`.
 - Streaming health: live stream cancellation and error counters when connected
@@ -85,6 +90,19 @@ path lives under `benchmarks/results/`, which is ignored by git.
 python -m unittest discover tools\perf_visualizer\tests
 ```
 
+If Python Playwright is installed, run the rendered dashboard smoke test:
+
+```powershell
+python tools\perf_visualizer\tests\validate_dashboard.py `
+  --effectiveness-exe build\effectiveness_runner.exe `
+  --screenshot-dir benchmarks\results\dashboard-validation
+```
+
+The Playwright smoke starts a temporary dashboard, runs an effectiveness sample,
+checks baseline and retrieval diagnostic panels, clicks `Run effectiveness`,
+verifies four nonblank charts, checks mobile overflow, and writes screenshots to
+the provided directory.
+
 ## Test The Whole Program
 
 From the repository root:
@@ -95,6 +113,7 @@ ctest --test-dir build --output-on-failure
 .\build\smoke_runner.exe
 .\build\effectiveness_runner.exe
 python -m unittest discover tools\perf_visualizer\tests
+python tools\perf_visualizer\tests\validate_dashboard.py --effectiveness-exe build\effectiveness_runner.exe
 ```
 
 For a local dashboard smoke test:
