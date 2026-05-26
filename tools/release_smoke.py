@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -62,6 +63,14 @@ def _check_tracked_ignored(repo_root: Path, *, dry_run: bool) -> None:
     if tracked:
         joined = "\n".join(tracked)
         raise RuntimeError(f"tracked ignored files remain:\n{joined}")
+
+
+def _clean_install_prefix(install_prefix: Path, *, dry_run: bool) -> None:
+    print("\n==> Clean install prefix")
+    print(f"remove {install_prefix}")
+    if dry_run or not install_prefix.exists():
+        return
+    shutil.rmtree(install_prefix)
 
 
 def _playwright_available() -> bool:
@@ -182,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         if not args.skip_install:
+            _clean_install_prefix(install_prefix, dry_run=args.dry_run)
             _run(
                 "Install smoke",
                 [
