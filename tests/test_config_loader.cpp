@@ -3,6 +3,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -178,8 +180,17 @@ TEST_F(ConfigLoaderTest, LoadsSecuredLanExampleConfig) {
     EXPECT_EQ(config.proxy_host, "0.0.0.0");
     EXPECT_FALSE(config.allow_unsafe_remote_proxy);
     ASSERT_FALSE(config.proxy_auth_bearer_tokens.empty());
-    EXPECT_NE(config.proxy_auth_bearer_tokens[0],
-              "replace-with-local-proxy-token");
+    const auto lan_token = config.proxy_auth_bearer_tokens[0];
+    auto normalized_token = lan_token;
+    std::transform(normalized_token.begin(), normalized_token.end(),
+                   normalized_token.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    EXPECT_NE(lan_token, "replace-with-local-proxy-token");
+    EXPECT_EQ(normalized_token.find("change-me"), std::string::npos);
+    EXPECT_EQ(normalized_token.find("changeme"), std::string::npos);
+    EXPECT_EQ(normalized_token.find("replace"), std::string::npos);
+    EXPECT_EQ(normalized_token.find("placeholder"), std::string::npos);
+    EXPECT_EQ(normalized_token.find("example"), std::string::npos);
     EXPECT_GT(config.proxy_max_request_bytes, 0u);
     EXPECT_FALSE(config.proxy_forward_client_authorization);
     EXPECT_GT(config.proxy_rate_limit_tokens_per_second, 0.0);
