@@ -713,7 +713,7 @@ json measure_fixture_retrieval() {
         {
             "sql",
             "data",
-            "sql prompt cache entries embedding vectors request audit schema",
+            "sql/schema.sql prompt_cache_entries embedding_vectors request_audit_log schema",
             "sql/schema.sql"
         },
         {
