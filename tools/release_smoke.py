@@ -65,7 +65,41 @@ def _check_tracked_ignored(repo_root: Path, *, dry_run: bool) -> None:
         raise RuntimeError(f"tracked ignored files remain:\n{joined}")
 
 
-def _clean_install_prefix(install_prefix: Path, *, dry_run: bool) -> None:
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_install_prefix_cleanup(
+    *,
+    install_prefix: Path,
+    build_dir: Path,
+    force: bool,
+) -> None:
+    if force:
+        return
+    if install_prefix == build_dir or not _is_relative_to(install_prefix, build_dir):
+        raise ValueError(
+            "refusing to clean install prefix outside the build directory; "
+            "use --force-clean-install-prefix to allow this"
+        )
+
+
+def _clean_install_prefix(
+    install_prefix: Path,
+    *,
+    build_dir: Path,
+    force: bool,
+    dry_run: bool,
+) -> None:
+    _validate_install_prefix_cleanup(
+        install_prefix=install_prefix,
+        build_dir=build_dir,
+        force=force,
+    )
     print("\n==> Clean install prefix")
     print(f"remove {install_prefix}")
     if dry_run or not install_prefix.exists():
@@ -85,6 +119,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--build-dir", default="build", help="CMake build directory.")
     parser.add_argument("--config", default="Debug", help="CMake build configuration.")
     parser.add_argument("--install-prefix", default="build/install-check")
+    parser.add_argument(
+        "--force-clean-install-prefix",
+        action="store_true",
+        help="Allow release smoke to remove an install prefix outside the build directory.",
+    )
     parser.add_argument("--skip-install", action="store_true")
     parser.add_argument("--skip-playwright", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
@@ -191,7 +230,12 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         if not args.skip_install:
-            _clean_install_prefix(install_prefix, dry_run=args.dry_run)
+            _clean_install_prefix(
+                install_prefix,
+                build_dir=build_dir,
+                force=args.force_clean_install_prefix,
+                dry_run=args.dry_run,
+            )
             _run(
                 "Install smoke",
                 [
