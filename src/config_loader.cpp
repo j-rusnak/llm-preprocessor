@@ -1,6 +1,7 @@
 #include "config_loader.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -83,11 +84,34 @@ long read_long_field(const nlohmann::json& j,
     return static_cast<long>(raw);
 }
 
+std::string lowercase_ascii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    return value;
+}
+
+bool is_placeholder_proxy_token(const std::string& token) {
+    const auto normalized = lowercase_ascii(token);
+    for (const std::string& marker : {
+             "replace",
+             "change-me",
+             "changeme",
+             "placeholder",
+             "example",
+         }) {
+        if (normalized.find(marker) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool contains_placeholder_proxy_token(const Config& config) {
-    return std::find(config.proxy_auth_bearer_tokens.begin(),
-                     config.proxy_auth_bearer_tokens.end(),
-                     "replace-with-local-proxy-token") !=
-           config.proxy_auth_bearer_tokens.end();
+    return std::any_of(config.proxy_auth_bearer_tokens.begin(),
+                       config.proxy_auth_bearer_tokens.end(),
+                       is_placeholder_proxy_token);
 }
 
 void reject_legacy_command_router_keys(const nlohmann::json& j) {
