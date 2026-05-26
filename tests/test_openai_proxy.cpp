@@ -650,7 +650,7 @@ TEST(OpenAIProxy, StreamingClientDisconnectDoesNotCacheOrCountUpstreamError) {
     EXPECT_EQ(h.cache.size(), 0u);
 }
 
-TEST(OpenAIProxy, StreamingClientDisconnectStopsLongRunningUpstreamEarly) {
+TEST(OpenAIProxy, LongStreamingClientDisconnectCancelsUpstreamWithoutCacheWrite) {
     ProxyHarness h;
     FakeUpstream up;
     up.streaming_response = true;
@@ -665,15 +665,20 @@ TEST(OpenAIProxy, StreamingClientDisconnectStopsLongRunningUpstreamEarly) {
     };
 
     httplib::Client cli("127.0.0.1", h.port);
+    std::string received;
     std::atomic<int> callbacks{0};
     auto r = cli.Post(
         "/v1/chat/completions", httplib::Headers{}, body.dump(), "application/json",
-        [&](const char*, std::size_t) {
+        [&](const char* data, std::size_t len) {
+            received.append(data, len);
             callbacks.fetch_add(1);
             return false;
         });
     (void)r;
     ASSERT_GE(callbacks.load(), 1);
+    EXPECT_NE(received.find("data: {\"choices\""), std::string::npos);
+    EXPECT_EQ(received.find("event: error"), std::string::npos);
+    EXPECT_EQ(received.find("data: [DONE]"), std::string::npos);
 
     json metrics;
     for (int i = 0; i < 200; ++i) {
@@ -689,6 +694,9 @@ TEST(OpenAIProxy, StreamingClientDisconnectStopsLongRunningUpstreamEarly) {
     }
 
     EXPECT_EQ(metrics.value("stream_cancellations_total", 0u), 1u);
+    EXPECT_EQ(metrics.value("upstream_errors_total", 0u), 0u);
+    EXPECT_EQ(metrics.value("cache_hits", 0u), 0u);
+    EXPECT_EQ(h.cache.size(), 0u);
     EXPECT_GE(up.streaming_write_failures.load(), 1);
     EXPECT_EQ(up.streaming_provider_completed.load(), 0);
     EXPECT_LT(up.streaming_chunks_written.load(), up.streaming_chunk_count / 2);
