@@ -5,6 +5,7 @@
 #include "sync_endpoint.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -80,6 +81,10 @@ struct OpenAIProxyConfig {
 
     /// Maximum vector entries returned by GET /sync/vectors. 0 = no limit.
     std::size_t sync_vector_export_limit = 1000;
+
+    /// Optional observer for proxy-generated streaming control events. This is
+    /// intended for diagnostics and tests; upstream SSE chunks are not reported.
+    std::function<void(const std::string&)> streaming_control_event_observer;
 };
 
 /// OpenAI-compatible HTTP proxy.

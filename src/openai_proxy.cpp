@@ -19,6 +19,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <stdexcept>
 
 #include <curl/curl.h>
@@ -260,14 +261,29 @@ UpstreamResponse forward_upstream(const std::string& url,
     return resp;
 }
 
-void write_sse_error(httplib::DataSink& sink, const std::string& message) {
+using StreamingControlEventObserver = std::function<void(const std::string&)>;
+
+void notify_streaming_control_event(
+    const StreamingControlEventObserver* observer,
+    const std::string& event) {
+    if (observer && *observer) {
+        (*observer)(event);
+    }
+}
+
+void write_sse_error(httplib::DataSink& sink,
+                     const std::string& message,
+                     const StreamingControlEventObserver* observer = nullptr) {
+    notify_streaming_control_event(observer, "error");
     const std::string event =
         "event: error\n"
         "data: " + json{{"error", message}}.dump() + "\n\n";
     sink.write(event.data(), event.size());
 }
 
-void write_sse_done(httplib::DataSink& sink) {
+void write_sse_done(httplib::DataSink& sink,
+                    const StreamingControlEventObserver* observer = nullptr) {
+    notify_streaming_control_event(observer, "done");
     const std::string done = "data: [DONE]\n\n";
     sink.write(done.data(), done.size());
 }
@@ -319,11 +335,12 @@ bool stream_upstream(const std::string& url,
                      long connect_timeout_seconds,
                      long idle_timeout_seconds,
                      ProxyMetrics* metrics,
+                     StreamingControlEventObserver control_event_observer,
                      httplib::DataSink& sink) {
     CURL* curl = curl_easy_init();
     if (!curl) {
-        write_sse_error(sink, "curl_easy_init failed");
-        write_sse_done(sink);
+        write_sse_error(sink, "curl_easy_init failed", &control_event_observer);
+        write_sse_done(sink, &control_event_observer);
         sink.done();
         return true;
     }
@@ -373,8 +390,8 @@ bool stream_upstream(const std::string& url,
         const std::string message = stream.idle_timed_out
             ? "upstream stream idle timeout"
             : std::string("upstream: ") + curl_easy_strerror(rc);
-        write_sse_error(sink, message);
-        write_sse_done(sink);
+        write_sse_error(sink, message, &control_event_observer);
+        write_sse_done(sink, &control_event_observer);
     }
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
@@ -827,17 +844,21 @@ void OpenAIProxy::install_routes() {
             const auto connect_timeout_seconds =
                 config_.upstream_connect_timeout_seconds;
             const auto idle_timeout_seconds = config_.stream_idle_timeout_seconds;
+            auto control_event_observer =
+                config_.streaming_control_event_observer;
             auto* metrics = &metrics_;
             res.set_header("Cache-Control", "no-cache");
             res.set_chunked_content_provider(
                 "text/event-stream",
                 [target_url, compiled, incoming_auth, fallback_key, timeout_seconds,
-                 connect_timeout_seconds, idle_timeout_seconds, metrics]
+                 connect_timeout_seconds, idle_timeout_seconds,
+                 control_event_observer, metrics]
                 (std::size_t, httplib::DataSink& sink) {
                     return stream_upstream(target_url, compiled, incoming_auth,
                                            fallback_key, timeout_seconds,
                                            connect_timeout_seconds,
-                                           idle_timeout_seconds, metrics, sink);
+                                           idle_timeout_seconds, metrics,
+                                           control_event_observer, sink);
                 });
             return;
         }

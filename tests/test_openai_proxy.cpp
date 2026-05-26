@@ -507,6 +507,15 @@ TEST(OpenAIProxy, StreamingTransportFailureEmitsErrorAndDone) {
     ProxyHarness h;
     preprocessor::OpenAIProxyConfig cfg;
     cfg.upstream_timeout_seconds = 1;
+    std::atomic<int> proxy_generated_error_events{0};
+    std::atomic<int> proxy_generated_done_events{0};
+    cfg.streaming_control_event_observer = [&](const std::string& event) {
+        if (event == "error") {
+            proxy_generated_error_events.fetch_add(1);
+        } else if (event == "done") {
+            proxy_generated_done_events.fetch_add(1);
+        }
+    };
     h.start("http://127.0.0.1:1/v1/chat/completions", cfg);
 
     json body = {
@@ -524,6 +533,8 @@ TEST(OpenAIProxy, StreamingTransportFailureEmitsErrorAndDone) {
     EXPECT_EQ(r->get_header_value("Content-Type"), "text/event-stream");
     EXPECT_NE(r->body.find("event: error"), std::string::npos);
     EXPECT_NE(r->body.find("data: [DONE]"), std::string::npos);
+    EXPECT_EQ(proxy_generated_error_events.load(), 1);
+    EXPECT_EQ(proxy_generated_done_events.load(), 1);
 
     const auto metrics = h.metrics.snapshot();
     EXPECT_EQ(metrics["upstream_errors_total"], 1u);
@@ -656,7 +667,18 @@ TEST(OpenAIProxy, LongStreamingClientDisconnectCancelsUpstreamWithoutCacheWrite)
     up.streaming_response = true;
     up.streaming_chunk_count = 500;
     up.streaming_chunk_delay_ms = 5;
-    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions");
+    std::atomic<int> proxy_generated_error_events{0};
+    std::atomic<int> proxy_generated_done_events{0};
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.streaming_control_event_observer = [&](const std::string& event) {
+        if (event == "error") {
+            proxy_generated_error_events.fetch_add(1);
+        } else if (event == "done") {
+            proxy_generated_done_events.fetch_add(1);
+        }
+    };
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
 
     json body = {
         {"model", "gpt-test"},
@@ -697,6 +719,8 @@ TEST(OpenAIProxy, LongStreamingClientDisconnectCancelsUpstreamWithoutCacheWrite)
     EXPECT_EQ(metrics.value("upstream_errors_total", 0u), 0u);
     EXPECT_EQ(metrics.value("cache_hits", 0u), 0u);
     EXPECT_EQ(h.cache.size(), 0u);
+    EXPECT_EQ(proxy_generated_error_events.load(), 0);
+    EXPECT_EQ(proxy_generated_done_events.load(), 0);
     EXPECT_GE(up.streaming_write_failures.load(), 1);
     EXPECT_EQ(up.streaming_provider_completed.load(), 0);
     EXPECT_LT(up.streaming_chunks_written.load(), up.streaming_chunk_count / 2);
