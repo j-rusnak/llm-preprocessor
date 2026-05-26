@@ -177,9 +177,13 @@ See [`vscode-extension/`](vscode-extension/) for the local MCP integration shim.
 
 ## Configuration
 
-Start from [`config.example.json`](config.example.json). The tracked example is
-loopback-only, auth-enabled, rate-limited, and tuned for a local coding-agent
-proxy.
+Start from [`config.production.example.json`](config.production.example.json)
+for loopback-local production use, or
+[`config.lan.example.json`](config.lan.example.json) for a secured
+non-loopback LAN deployment. Both examples are auth-enabled, rate-limited, keep
+request-size limits positive, and leave `upstream_api_key` empty for local
+secret injection. See [docs/PRODUCTION_CONFIG.md](docs/PRODUCTION_CONFIG.md)
+for health checks, auth separation, and deployment guidance.
 
 | Key | Default | Purpose |
 |---|---|---|
@@ -231,6 +235,9 @@ Security defaults:
   `allow_unsafe_remote_proxy=true`.
 - Placeholder example tokens are rejected on non-loopback hosts.
 - Request-size limits are enforced before JSON parsing and forwarding.
+- Use `X-Preprocessor-Authorization` for local proxy auth and keep upstream
+  provider credentials separate through `Authorization` forwarding or
+  `upstream_api_key`.
 
 ## Testing
 
