@@ -84,6 +84,8 @@ struct OpenAIProxyConfig {
 
     /// Optional observer for proxy-generated streaming control events. This is
     /// intended for diagnostics and tests; upstream SSE chunks are not reported.
+    /// It may be invoked concurrently from request-handling threads, so the
+    /// callback must be thread-safe. Exceptions are ignored and non-fatal.
     std::function<void(const std::string&)> streaming_control_event_observer;
 };
 

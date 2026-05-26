@@ -18,6 +18,7 @@
 #include <fstream>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -535,6 +536,35 @@ TEST(OpenAIProxy, StreamingTransportFailureEmitsErrorAndDone) {
     EXPECT_NE(r->body.find("data: [DONE]"), std::string::npos);
     EXPECT_EQ(proxy_generated_error_events.load(), 1);
     EXPECT_EQ(proxy_generated_done_events.load(), 1);
+
+    const auto metrics = h.metrics.snapshot();
+    EXPECT_EQ(metrics["upstream_errors_total"], 1u);
+}
+
+TEST(OpenAIProxy, StreamingControlObserverExceptionsAreNonFatal) {
+    ProxyHarness h;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.upstream_timeout_seconds = 1;
+    cfg.streaming_control_event_observer = [](const std::string&) {
+        throw std::runtime_error("observer failed");
+    };
+    h.start("http://127.0.0.1:1/v1/chat/completions", cfg);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"stream", true},
+        {"messages", json::array({{{"role", "user"}, {"content", "hello"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    cli.set_read_timeout(5, 0);
+    auto r = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+    EXPECT_EQ(r->get_header_value("Content-Type"), "text/event-stream");
+    EXPECT_NE(r->body.find("event: error"), std::string::npos);
+    EXPECT_NE(r->body.find("data: [DONE]"), std::string::npos);
 
     const auto metrics = h.metrics.snapshot();
     EXPECT_EQ(metrics["upstream_errors_total"], 1u);

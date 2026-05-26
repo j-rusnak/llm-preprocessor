@@ -267,7 +267,11 @@ void notify_streaming_control_event(
     const StreamingControlEventObserver* observer,
     const std::string& event) {
     if (observer && *observer) {
-        (*observer)(event);
+        try {
+            (*observer)(event);
+        } catch (...) {
+            // Observer failures must not affect streaming responses.
+        }
     }
 }
 
