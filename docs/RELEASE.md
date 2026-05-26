@@ -47,7 +47,9 @@ Expected result:
 - visualizer unit tests pass,
 - `--version` reports project version, build config, and commit,
 - install prefix contains `preprocessor_app`, ONNX Runtime redistributables,
-  and `LLMPreprocessorConfig.cmake`.
+  and `LLMPreprocessorConfig.cmake`,
+- package audit passes with no runtime state, model files, or archive artifacts
+  in the install prefix.
 
 `tools/release_smoke.py` runs the dashboard browser smoke automatically when
 Python Playwright is installed. To run that check directly:
@@ -87,6 +89,7 @@ The release workflow must pass on Windows, Linux, and macOS:
 - ONNX Runtime download/extraction,
 - configure and build,
 - install smoke check,
+- package audit,
 - CTest,
 - smoke runner,
 - effectiveness runner,

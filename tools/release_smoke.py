@@ -197,6 +197,13 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
                 timeout_seconds=args.command_timeout_sec,
             )
+            _run(
+                "Package audit",
+                [sys.executable, "tools/package_audit.py", str(install_prefix)],
+                cwd=repo_root,
+                dry_run=args.dry_run,
+                timeout_seconds=args.command_timeout_sec,
+            )
 
         print("\nRelease smoke gate completed.")
         return 0
