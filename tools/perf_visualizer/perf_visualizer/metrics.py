@@ -70,6 +70,7 @@ def normalize_effectiveness_report(
     near_misses = fixture.get("near_misses", []) if isinstance(fixture, dict) else []
     slowest_queries = fixture.get("slowest_queries", []) if isinstance(fixture, dict) else []
     by_language = fixture.get("by_language", {}) if isinstance(fixture, dict) else {}
+    by_category = fixture.get("by_category", {}) if isinstance(fixture, dict) else {}
     fixture_queries = _get(report, ("fixture_retrieval", "queries"))
     if fixture_queries <= 0 and isinstance(by_language, dict):
         fixture_queries = sum(
@@ -87,7 +88,9 @@ def normalize_effectiveness_report(
         "diff_wire_savings_pct": _rounded(_get(report, ("diff_patcher", "wire_savings_pct"))),
         "bm25_top3_pct": _rounded(_get(report, ("bm25_index", "top3_pct"))),
         "bm25_avg_query_us": _rounded(_get(report, ("bm25_index", "avg_query_us"))),
+        "fixture_top1_pct": _rounded(_get(report, ("fixture_retrieval", "top1_pct"))),
         "fixture_top3_pct": _rounded(_get(report, ("fixture_retrieval", "top3_pct"))),
+        "fixture_mrr": _rounded(_get(report, ("fixture_retrieval", "mrr"))),
         "fixture_avg_query_us": _rounded(_get(report, ("fixture_retrieval", "avg_query_us"))),
         "context_budget_used_pct": _rounded(_pct(context_chars, context_budget)),
         "context_included_chunks": _rounded(_get(report, ("context_packing", "included_chunks"))),
@@ -103,6 +106,9 @@ def normalize_effectiveness_report(
         "retrieval_graph_expanded_queries": _rounded(
             _get(report, ("fixture_retrieval", "graph_expanded_queries"))
         ),
+        "retrieval_graph_lift_queries": _rounded(
+            _get(report, ("fixture_retrieval", "graph_lift_queries"))
+        ),
     }
 
     cards = [
@@ -110,6 +116,8 @@ def normalize_effectiveness_report(
               "Heuristic prompt rewriting token reduction."),
         _card("fixture_top3_pct", "Fixture retrieval top-3", series["fixture_top3_pct"], "%", "retrieval",
               "Expected file appears in the first three retrieved chunks."),
+        _card("fixture_mrr", "Fixture retrieval MRR", series["fixture_mrr"], "", "retrieval",
+              "Mean reciprocal rank for expected fixture files."),
         _card("prompt_cache_speedup_x", "Prompt cache speedup", series["prompt_cache_speedup_x"], "x", "memory",
               "Warm cache path relative to synthetic cold work."),
         _card("embedding_cache_speedup_x", "Embedding cache speedup", series["embedding_cache_speedup_x"], "x", "memory",
@@ -131,6 +139,7 @@ def normalize_effectiveness_report(
         "raw_summary": {
             "fixture_by_language": by_language,
             "retrieval_by_language": by_language,
+            "retrieval_by_category": by_category,
             "retrieval_diagnostics": diagnostics,
             "retrieval_near_misses": near_misses,
             "retrieval_slowest_queries": slowest_queries,
@@ -200,6 +209,108 @@ def normalize_proxy_stats(
         "series": series,
         "cards": cards,
         "model_families": stats.get("tokens_by_model_family", {}),
+    }
+
+
+def build_agent_summary(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    if not snapshot:
+        return {
+            "status": "missing",
+            "snapshot": None,
+            "key_metrics": {},
+            "retrieval": {},
+            "recommendations": ["Run effectiveness_runner before asking agents to optimize retrieval or prompt efficiency."],
+        }
+
+    series = snapshot.get("series", {}) if isinstance(snapshot, dict) else {}
+    raw = snapshot.get("raw_summary", {}) if isinstance(snapshot, dict) else {}
+    if not isinstance(series, dict):
+        series = {}
+    if not isinstance(raw, dict):
+        raw = {}
+
+    key_metrics = {
+        "token_reduction_pct": _rounded(_number(series.get("token_reduction_pct"))),
+        "fixture_top1_pct": _rounded(_number(series.get("fixture_top1_pct"))),
+        "fixture_top3_pct": _rounded(_number(series.get("fixture_top3_pct"))),
+        "fixture_mrr": _rounded(_number(series.get("fixture_mrr"))),
+        "retrieval_near_misses": _rounded(_number(series.get("retrieval_near_misses"))),
+        "retrieval_graph_lift_queries": _rounded(_number(series.get("retrieval_graph_lift_queries"))),
+        "embedding_cache_speedup_x": _rounded(_number(series.get("embedding_cache_speedup_x"))),
+        "diff_wire_savings_pct": _rounded(_number(series.get("diff_wire_savings_pct"))),
+        "context_budget_used_pct": _rounded(_number(series.get("context_budget_used_pct"))),
+        "cache_hit_rate_pct": _rounded(_number(series.get("cache_hit_rate_pct"))),
+        "requests_total": _rounded(_number(series.get("requests_total"))),
+    }
+
+    near_misses = raw.get("retrieval_near_misses", [])
+    slowest = raw.get("retrieval_slowest_queries", [])
+    diagnostics = raw.get("retrieval_diagnostics", [])
+    by_language = raw.get("retrieval_by_language", {})
+    by_category = raw.get("retrieval_by_category", {})
+    if not isinstance(near_misses, list):
+        near_misses = []
+    if not isinstance(slowest, list):
+        slowest = []
+    if not isinstance(diagnostics, list):
+        diagnostics = []
+    if not isinstance(by_language, dict):
+        by_language = {}
+    if not isinstance(by_category, dict):
+        by_category = {}
+
+    recommendations: list[str] = []
+    fixture_top3 = key_metrics["fixture_top3_pct"]
+    fixture_mrr = key_metrics["fixture_mrr"]
+    near_miss_count = key_metrics["retrieval_near_misses"]
+    graph_lift = key_metrics["retrieval_graph_lift_queries"]
+    token_reduction = key_metrics["token_reduction_pct"]
+
+    if fixture_top3 and fixture_top3 < 95.0:
+        recommendations.append(
+            "Improve retrieval before release: inspect fixture diagnostics, near misses, and category MRR before tuning graph weights."
+        )
+    if fixture_mrr and fixture_mrr < 0.9:
+        recommendations.append(
+            "Raise retrieval rank quality: expected files are present but not consistently first, so prioritize query normalization and ranking fixtures."
+        )
+    if near_miss_count > 0:
+        recommendations.append(
+            "Resolve retrieval near misses before expanding benchmark scope or publishing performance claims."
+        )
+    if graph_lift <= 0 and snapshot.get("kind") == "effectiveness":
+        recommendations.append(
+            "Add or repair graph-lift fixtures so symbol expansion has a measurable agent-facing benefit."
+        )
+    if token_reduction <= 0 and snapshot.get("kind") == "effectiveness":
+        recommendations.append(
+            "Verify prompt rewriting is enabled in the effectiveness run before comparing LLM-efficiency trends."
+        )
+    if not diagnostics and snapshot.get("kind") == "effectiveness":
+        recommendations.append(
+            "Run a current effectiveness sample with retrieval diagnostics before making retrieval release decisions."
+        )
+    if not recommendations:
+        recommendations.append("Current diagnostics are within the configured release attention thresholds.")
+
+    status = "ok" if len(recommendations) == 1 and recommendations[0].startswith("Current diagnostics") else "attention"
+
+    return {
+        "status": status,
+        "snapshot": {
+            "kind": snapshot.get("kind"),
+            "source": snapshot.get("source"),
+            "timestamp_ms": snapshot.get("timestamp_ms"),
+        },
+        "key_metrics": key_metrics,
+        "retrieval": {
+            "by_language": by_language,
+            "by_category": by_category,
+            "near_misses": near_misses[:5],
+            "slowest_queries": slowest[:5],
+            "diagnostics": diagnostics[:10],
+        },
+        "recommendations": recommendations,
     }
 
 

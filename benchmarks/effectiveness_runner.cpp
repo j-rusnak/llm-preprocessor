@@ -200,6 +200,27 @@ std::unique_ptr<preprocessor::RepoIndex> make_retrieval_index() {
     return std::make_unique<preprocessor::RepoIndex>(emb, chunker, cfg);
 }
 
+std::string normalized_path(std::string path) {
+    std::replace(path.begin(), path.end(), '\\', '/');
+    return path;
+}
+
+bool path_contains_fragment(const std::string& path, const std::string& fragment) {
+    return normalized_path(path).find(fragment) != std::string::npos;
+}
+
+bool find_chunk_by_path_fragment(const preprocessor::RepoIndex& index,
+                                 const std::string& fragment,
+                                 preprocessor::CodeChunk& out) {
+    for (auto chunk : index.snapshot_chunks()) {
+        if (path_contains_fragment(chunk.file_path, fragment)) {
+            out = std::move(chunk);
+            return true;
+        }
+    }
+    return false;
+}
+
 void hydrate_chunks(preprocessor::RepoIndex& index,
                     const std::vector<preprocessor::CodeChunk>& chunks) {
     std::vector<preprocessor::SyncVectorEntry> entries;
@@ -624,131 +645,159 @@ json measure_fixture_retrieval() {
 
     struct Case {
         std::string language;
+        std::string category;
         std::string query;
         std::string expected_path_fragment;
     };
     const std::vector<Case> cases = {
         {
             "cpp",
+            "streaming",
             "proxy stats auth failures stream cancellation upstream timeout",
             "cpp/openai_proxy_slice.cpp"
         },
         {
             "typescript",
+            "ui",
             "debounced search AbortController stale fetch results",
             "typescript/searchPanel.ts"
         },
         {
             "python",
+            "data",
             "jsonl ingestion retry exponential backoff batch records",
             "python/ingest_pipeline.py"
         },
         {
             "markdown",
+            "release",
             "production deployment loopback auth unsafe remote proxy request size",
             "docs/production.md"
         },
         {
             "cmake",
+            "release",
             "cmake package config install target onnx runtime redistributable vcpkg",
             "cmake/CMakeLists.txt"
         },
         {
+            "security",
             "security",
             "security/auth_middleware_slice.cpp verify_local_proxy_request reject_replay_window allowed_skew_seconds",
             "security/auth_middleware_slice.cpp"
         },
         {
             "go",
+            "networking",
             "go http retry transport context deadline exponential backoff round trip",
             "go/http_retry_transport.go"
         },
         {
             "rust",
+            "cache",
             "rust workspace cache lru snapshot eviction pathbuf",
             "rust/workspace_cache.rs"
         },
         {
             "java",
+            "security",
             "java servlet auth filter hmac preprocessor authorization header",
             "java/AuthFilter.java"
         },
         {
             "yaml",
+            "infra",
             "yaml kubernetes deployment readiness probe auth token memory limit",
             "yaml/kubernetes-deployment.yaml"
         },
         {
             "sql",
+            "data",
             "sql prompt cache entries embedding vectors request audit schema",
             "sql/schema.sql"
         },
         {
             "cpp",
+            "context",
             "cpp context budget guard elides duplicate chunks by score",
             "cpp/context_budget_guard.cpp"
         },
         {
             "typescript",
+            "diagnostics",
             "typescript buildContextGraphRows RetrievalDiagnostic topKPreview graphLift nearMiss",
             "typescript/contextGraphPanel.ts"
         },
         {
             "python",
+            "visualizer",
             "python baseline comparison ndjson snapshot regression delta",
             "python/baseline_compare.py"
         },
         {
             "go",
+            "cache",
             "go embedding cache warmer prefetches repository retrieval vectors",
             "go/cache_warmer.go"
         },
         {
             "rust",
+            "streaming",
             "rust upstream stream cancellation aborts sink on disconnect",
             "rust/stream_cancel.rs"
         },
         {
             "java",
+            "routing",
             "java/ModelRoutingPolicy.java chooseTier CodeGenerate requestChars frontier fallback",
             "java/ModelRoutingPolicy.java"
         },
         {
             "yaml",
+            "observability",
             "yaml prometheus alert retrieval accuracy stream cancellation",
             "yaml/observability-rules.yaml"
         },
         {
             "sql",
+            "visualizer",
             "sql dashboard history retention baseline snapshots",
             "sql/retention_policy.sql"
         },
         {
             "cmake",
+            "release",
             "cmake package smoke imported target onnx runtime install",
             "cmake/PackageSmoke.cmake"
         },
         {
+            "security",
             "security",
             "security tenant hmac nonce replay preprocessor authorization",
             "security/tenant_auth_policy.cpp"
         },
         {
             "markdown",
+            "diagnostics",
             "markdown retrieval debugging near miss expected rank diagnostics",
             "docs/retrieval-debugging.md"
         },
     };
 
-    struct LanguageAggregate {
+    struct QueryAggregate {
         int queries = 0;
+        int top1_correct = 0;
         int top3_correct = 0;
+        double reciprocal_rank_sum = 0.0;
         double total_us = 0.0;
     };
 
-    std::unordered_map<std::string, LanguageAggregate> aggregates;
+    std::unordered_map<std::string, QueryAggregate> language_aggregates;
+    std::unordered_map<std::string, QueryAggregate> category_aggregates;
     std::vector<json> diagnostic_rows;
+    int top1 = 0;
     int top3 = 0;
+    double reciprocal_rank_total = 0.0;
     double total_us = 0.0;
     for (const auto& c : cases) {
         auto t0 = Clock::now();
@@ -774,6 +823,10 @@ json measure_fixture_retrieval() {
                 if (i < 3) found = true;
             }
         }
+        const bool top1_hit = expected_rank == 1;
+        const double reciprocal_rank = expected_rank > 0
+            ? 1.0 / static_cast<double>(expected_rank)
+            : 0.0;
 
         preprocessor::GraphExpansionConfig cfg;
         cfg.max_expanded = 2;
@@ -783,34 +836,113 @@ json measure_fixture_retrieval() {
             ? expanded.size() - hits.size()
             : 0u;
 
+        if (top1_hit) ++top1;
         if (found) ++top3;
-        auto& aggregate = aggregates[c.language];
-        aggregate.queries += 1;
-        aggregate.top3_correct += found ? 1 : 0;
-        aggregate.total_us += query_us;
+        reciprocal_rank_total += reciprocal_rank;
+        auto update_aggregate = [&](QueryAggregate& aggregate) {
+            aggregate.queries += 1;
+            aggregate.top1_correct += top1_hit ? 1 : 0;
+            aggregate.top3_correct += found ? 1 : 0;
+            aggregate.reciprocal_rank_sum += reciprocal_rank;
+            aggregate.total_us += query_us;
+        };
+        update_aggregate(language_aggregates[c.language]);
+        update_aggregate(category_aggregates[c.category]);
 
         diagnostic_rows.push_back({
             {"language", c.language},
+            {"category", c.category},
             {"query", c.query},
             {"expected", c.expected_path_fragment},
             {"expected_rank", expected_rank == 0 ? json(nullptr) : json(expected_rank)},
+            {"top1_hit", top1_hit},
             {"top3_hit", found},
+            {"reciprocal_rank", reciprocal_rank},
             {"query_us", query_us},
             {"top_k", top_k},
             {"graph_expanded_count", graph_expanded_count},
         });
     }
 
-    json by_language = json::object();
-    for (const auto& kv : aggregates) {
-        const auto& language = kv.first;
-        const auto& aggregate = kv.second;
-        by_language[language] = {
-            {"queries", aggregate.queries},
-            {"top3_correct", aggregate.top3_correct},
-            {"top3_pct", 100.0 * aggregate.top3_correct / aggregate.queries},
-            {"avg_query_us", aggregate.total_us / aggregate.queries},
-        };
+    auto render_aggregates = [](const std::unordered_map<std::string, QueryAggregate>& aggregates) {
+        json rendered = json::object();
+        for (const auto& kv : aggregates) {
+            const auto& name = kv.first;
+            const auto& aggregate = kv.second;
+            rendered[name] = {
+                {"queries", aggregate.queries},
+                {"top1_correct", aggregate.top1_correct},
+                {"top3_correct", aggregate.top3_correct},
+                {"top1_pct", 100.0 * aggregate.top1_correct / aggregate.queries},
+                {"top3_pct", 100.0 * aggregate.top3_correct / aggregate.queries},
+                {"mrr", aggregate.reciprocal_rank_sum / aggregate.queries},
+                {"avg_query_us", aggregate.total_us / aggregate.queries},
+            };
+        }
+        return rendered;
+    };
+
+    json by_language = render_aggregates(language_aggregates);
+    json by_category = render_aggregates(category_aggregates);
+
+    struct GraphLiftCase {
+        std::string category;
+        std::string query;
+        std::string seed_expected;
+        std::string expanded_expected;
+    };
+    const std::vector<GraphLiftCase> graph_lift_cases = {
+        {
+            "security",
+            "login controller parse session cookie response",
+            "cpp/login_controller.cpp",
+            "security/signature_verifier.cpp",
+        },
+    };
+
+    auto top_n_contains = [](const std::vector<preprocessor::RetrievedChunk>& hits,
+                             const std::string& expected,
+                             std::size_t top_n) {
+        const std::size_t limit = (std::min)(top_n, hits.size());
+        for (std::size_t i = 0; i < limit; ++i) {
+            std::string path = hits[i].chunk.file_path;
+            std::replace(path.begin(), path.end(), '\\', '/');
+            if (path.find(expected) != std::string::npos) return true;
+        }
+        return false;
+    };
+
+    int graph_lift_queries = 0;
+    json graph_lift_rows = json::array();
+    for (const auto& c : graph_lift_cases) {
+        const auto base = index->search(c.query, 3);
+        preprocessor::CodeChunk seed;
+        const bool seed_found = find_chunk_by_path_fragment(*index, c.seed_expected, seed);
+        std::vector<preprocessor::RetrievedChunk> seeds;
+        if (seed_found) {
+            const float seed_score = base.empty() ? 1.0f : base.front().score;
+            seeds.push_back({seed, seed_score});
+        }
+
+        preprocessor::GraphExpansionConfig cfg;
+        cfg.max_expanded = 2;
+        cfg.query_text = c.query;
+        const auto expanded = preprocessor::expand_with_graph(seeds, graph, *index, cfg);
+
+        const bool base_top3_hit = top_n_contains(base, c.expanded_expected, 3);
+        const bool expanded_top3_hit = top_n_contains(expanded, c.expanded_expected, 3);
+        if (seed_found && !base_top3_hit && expanded_top3_hit) ++graph_lift_queries;
+
+        graph_lift_rows.push_back({
+            {"category", c.category},
+            {"query", c.query},
+            {"seed_expected", c.seed_expected},
+            {"expanded_expected", c.expanded_expected},
+            {"seed_found", seed_found},
+            {"base_top3_hit", base_top3_hit},
+            {"expanded_top3_hit", expanded_top3_hit},
+            {"lift", seed_found && !base_top3_hit && expanded_top3_hit},
+        });
     }
 
     std::vector<json> slowest = diagnostic_rows;
@@ -833,14 +965,20 @@ json measure_fixture_retrieval() {
     return {
         {"files", index->file_count()},
         {"queries", cases.size()},
+        {"top1_correct", top1},
+        {"top1_pct", 100.0 * top1 / cases.size()},
         {"top3_correct", top3},
         {"top3_pct", 100.0 * top3 / cases.size()},
+        {"mrr", reciprocal_rank_total / cases.size()},
         {"avg_query_us", total_us / cases.size()},
         {"by_language", by_language},
+        {"by_category", by_category},
         {"diagnostics", diagnostics},
         {"near_misses", near_misses},
         {"slowest_queries", slowest},
         {"graph_expanded_queries", graph_expanded_queries},
+        {"graph_lift_queries", graph_lift_queries},
+        {"graph_lift_cases", graph_lift_rows},
     };
 }
 

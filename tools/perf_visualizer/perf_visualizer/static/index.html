@@ -71,16 +71,31 @@
         <article class="panel">
           <div class="panel-head">
             <h2>Baseline Comparison</h2>
-            <span>latest vs first matching sample</span>
+            <span>latest vs selected sample</span>
+          </div>
+          <div class="panel-control">
+            <label for="baselineSelect">Baseline sample</label>
+            <select id="baselineSelect" aria-label="Baseline sample"></select>
           </div>
           <div id="baselineRows" class="insight-list"></div>
         </article>
         <article class="panel">
           <div class="panel-head">
             <h2>Retrieval Diagnostics</h2>
-            <span>per-language top-3 quality</span>
+            <span>language and category quality</span>
           </div>
           <div id="languageRows" class="insight-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Query Drilldown</h2>
+            <span>ranked retrieval result details</span>
+          </div>
+          <div class="panel-control">
+            <label for="diagnosticSelect">Retrieval query</label>
+            <select id="diagnosticSelect" aria-label="Retrieval query"></select>
+          </div>
+          <div id="diagnosticDetail" class="detail-box"></div>
         </article>
         <article class="panel">
           <div class="panel-head">
@@ -95,6 +110,17 @@
             <span>expected file outside top-3</span>
           </div>
           <div id="nearMissRows" class="insight-list"></div>
+        </article>
+        <article class="panel export-panel">
+          <div class="panel-head">
+            <h2>Report Export</h2>
+            <span>current dashboard snapshot</span>
+          </div>
+          <div class="export-actions">
+            <button id="exportMarkdown" type="button">Export Markdown report</button>
+            <button id="exportJson" type="button">Export JSON report</button>
+          </div>
+          <textarea id="exportOutput" aria-label="Exported report" readonly></textarea>
         </article>
       </section>
 

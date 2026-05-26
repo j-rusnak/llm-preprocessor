@@ -244,6 +244,12 @@ ctest --test-dir build --output-on-failure
 .\build\effectiveness_runner.exe
 ```
 
+For a full release-candidate pass with the same gates in one entry point:
+
+```powershell
+python tools\release_smoke.py
+```
+
 The smoke runner exercises the local middleware pipeline without requiring the
 ONNX model. The effectiveness runner emits JSON to stdout and a summary table
 to stderr for cache speedup, context packing, compression, retrieval quality,
