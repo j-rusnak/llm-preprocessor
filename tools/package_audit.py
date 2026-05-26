@@ -19,8 +19,35 @@ FORBIDDEN_SUFFIXES = {
 REQUIRED_CONFIG = Path("lib/cmake/LLMPreprocessor/LLMPreprocessorConfig.cmake")
 
 
+def _required_executable() -> Path:
+    suffix = ".exe" if sys.platform == "win32" else ""
+    return Path("bin") / f"preprocessor_app{suffix}"
+
+
+def _required_runtime_library() -> Path:
+    if sys.platform == "win32":
+        return Path("bin") / "onnxruntime.dll"
+    if sys.platform == "darwin":
+        return Path("lib") / "libonnxruntime.dylib"
+    return Path("lib") / "libonnxruntime.so"
+
+
+def _required_files() -> list[Path]:
+    return [
+        REQUIRED_CONFIG,
+        _required_executable(),
+        _required_runtime_library(),
+    ]
+
+
 def _relative_name(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
+
+
+def _missing_name(required: Path) -> str:
+    if required == REQUIRED_CONFIG:
+        return required.name
+    return required.as_posix()
 
 
 def audit_install_tree(root: str | Path) -> dict[str, object]:
@@ -35,8 +62,9 @@ def audit_install_tree(root: str | Path) -> dict[str, object]:
     else:
         missing.append(str(install_root))
 
-    if not (install_root / REQUIRED_CONFIG).is_file():
-        missing.append(REQUIRED_CONFIG.name)
+    for required in _required_files():
+        if not (install_root / required).is_file():
+            missing.append(_missing_name(required))
 
     status = "fail" if forbidden or missing else "ok"
     return {
