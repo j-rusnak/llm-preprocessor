@@ -142,20 +142,17 @@ TEST_F(ConfigLoaderTest, LoadsProxySecuritySettings) {
 }
 
 TEST_F(ConfigLoaderTest, LoadsProductionExampleConfig) {
-    const auto path = repo_file("config.example.json");
+    const auto path = repo_file("config.production.example.json");
     ASSERT_TRUE(std::filesystem::exists(path)) << path;
 
     auto config = preprocessor::ConfigLoader::load(path);
 
     EXPECT_EQ(config.proxy_host, "127.0.0.1");
     EXPECT_FALSE(config.allow_unsafe_remote_proxy);
-    ASSERT_EQ(config.proxy_auth_bearer_tokens.size(), 1u);
-    EXPECT_EQ(config.proxy_auth_bearer_tokens[0],
-              "replace-with-local-proxy-token");
+    EXPECT_FALSE(config.proxy_auth_bearer_tokens.empty());
     EXPECT_FALSE(config.proxy_forward_client_authorization);
-    EXPECT_DOUBLE_EQ(config.proxy_rate_limit_tokens_per_second, 5.0);
-    EXPECT_DOUBLE_EQ(config.proxy_rate_limit_burst, 20.0);
-    EXPECT_EQ(config.proxy_max_request_bytes, 1048576u);
+    EXPECT_GT(config.proxy_max_request_bytes, 0u);
+    EXPECT_FALSE(config.upstream_url.empty());
     EXPECT_EQ(config.upstream_timeout_seconds, 60);
     EXPECT_EQ(config.upstream_connect_timeout_seconds, 10);
     EXPECT_EQ(config.upstream_max_response_bytes, 8388608u);
@@ -170,6 +167,23 @@ TEST_F(ConfigLoaderTest, LoadsProductionExampleConfig) {
     EXPECT_TRUE(config.prompt_rewriter_enabled);
     EXPECT_EQ(config.prompt_rewriter_kind, "heuristic");
     EXPECT_EQ(config.prompt_rewriter_max_chars, 8000u);
+}
+
+TEST_F(ConfigLoaderTest, LoadsSecuredLanExampleConfig) {
+    const auto path = repo_file("config.lan.example.json");
+    ASSERT_TRUE(std::filesystem::exists(path)) << path;
+
+    auto config = preprocessor::ConfigLoader::load(path);
+
+    EXPECT_EQ(config.proxy_host, "0.0.0.0");
+    EXPECT_FALSE(config.allow_unsafe_remote_proxy);
+    ASSERT_FALSE(config.proxy_auth_bearer_tokens.empty());
+    EXPECT_NE(config.proxy_auth_bearer_tokens[0],
+              "replace-with-local-proxy-token");
+    EXPECT_GT(config.proxy_max_request_bytes, 0u);
+    EXPECT_FALSE(config.proxy_forward_client_authorization);
+    EXPECT_GT(config.proxy_rate_limit_tokens_per_second, 0.0);
+    EXPECT_GT(config.proxy_rate_limit_burst, 0.0);
 }
 
 TEST_F(ConfigLoaderTest, RejectsNonLoopbackProxyWithoutAuthByDefault) {

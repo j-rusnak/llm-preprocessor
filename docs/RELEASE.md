@@ -72,13 +72,17 @@ the release notes.
 
 Before using `--serve` outside a local test:
 
-- Copy `config.example.json` and replace `replace-with-local-proxy-token`.
+- Copy `config.production.example.json` for loopback-local deployments or
+  `config.lan.example.json` for secured non-loopback LAN deployments.
+- Replace every example local proxy token with a deployment-specific value.
 - Keep `proxy_forward_client_authorization` disabled when local proxy auth uses
   `X-Preprocessor-Authorization`.
 - Keep `proxy_max_request_bytes` positive.
 - Set `upstream_api_key` through a deployment secret mechanism or local config
   that is not committed.
 - Run `preprocessor_app --health <config>` after model and vocab files exist.
+- Review [Production Configuration](PRODUCTION_CONFIG.md) before non-loopback
+  serving, and do not use `allow_unsafe_remote_proxy` for real deployments.
 
 ## CI Expectations
 
