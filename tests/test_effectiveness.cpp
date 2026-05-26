@@ -486,6 +486,18 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
             "markdown retrieval debugging near miss expected rank diagnostics",
             "docs/retrieval-debugging.md"
         },
+        {
+            "python auth dependency override verify bearer token request state",
+            "realworld/python/service_auth.py"
+        },
+        {
+            "typescript agent context store retrieval window persistence budget",
+            "realworld/typescript/agent_context_store.ts"
+        },
+        {
+            "cpp stream forwarder cancel upstream on client disconnect idle timeout",
+            "realworld/cpp/stream_forwarder.cpp"
+        },
     };
 
     for (const auto& c : cases) {
