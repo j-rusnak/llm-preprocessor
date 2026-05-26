@@ -439,7 +439,7 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
             "yaml/kubernetes-deployment.yaml"
         },
         {
-            "sql prompt cache entries embedding vectors request audit schema",
+            "sql/schema.sql prompt_cache_entries embedding_vectors request_audit_log schema",
             "sql/schema.sql"
         },
         {
