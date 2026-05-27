@@ -52,6 +52,36 @@ def _run(
     )
 
 
+def _run_capture(
+    label: str,
+    command: list[str],
+    *,
+    cwd: Path,
+    dry_run: bool,
+    timeout_seconds: float | None = None,
+) -> subprocess.CompletedProcess[str] | None:
+    print(f"\n==> {label}")
+    print(" ".join(command))
+    if dry_run:
+        return None
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds,
+    )
+
+
+def _verify_version_commit(*, version_output: str, head_commit: str) -> None:
+    if head_commit and head_commit not in version_output:
+        raise ValueError(
+            "preprocessor_app --version does not match git HEAD; "
+            f"expected commit {head_commit!r} in {version_output.strip()!r}"
+        )
+
+
 def _check_tracked_ignored(repo_root: Path, *, dry_run: bool) -> None:
     command = ["git", "ls-files", "-ci", "--exclude-standard"]
     print("\n==> Release hygiene")
@@ -141,6 +171,14 @@ def main(argv: list[str] | None = None) -> int:
         _check_tracked_ignored(repo_root, dry_run=args.dry_run)
 
         _run(
+            "Configure",
+            ["cmake", "-S", str(repo_root), "-B", str(build_dir)],
+            cwd=repo_root,
+            dry_run=args.dry_run,
+            timeout_seconds=args.command_timeout_sec,
+        )
+
+        _run(
             "Build",
             ["cmake", "--build", str(build_dir), "--config", args.config, "--parallel"],
             cwd=repo_root,
@@ -221,13 +259,26 @@ def main(argv: list[str] | None = None) -> int:
             print("\n==> Visualizer Playwright smoke")
             print("Python Playwright is not installed; skipping browser smoke.")
 
-        _run(
+        version_result = _run_capture(
             "Version",
             [str(preprocessor_app), "--version"],
             cwd=repo_root,
             dry_run=args.dry_run,
             timeout_seconds=args.command_timeout_sec,
         )
+        head_result = _run_capture(
+            "Git HEAD",
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_root,
+            dry_run=args.dry_run,
+            timeout_seconds=args.command_timeout_sec,
+        )
+        if version_result is not None and head_result is not None:
+            print(version_result.stdout, end="")
+            _verify_version_commit(
+                version_output=version_result.stdout,
+                head_commit=head_result.stdout.strip(),
+            )
 
         if not args.skip_install:
             _clean_install_prefix(
