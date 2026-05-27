@@ -240,6 +240,9 @@ Security defaults:
 - Use `X-Preprocessor-Authorization` for local proxy auth and keep upstream
   provider credentials separate through `Authorization` forwarding or
   `upstream_api_key`.
+- Never commit copied local configs such as `config.production.local.json` or
+  `config.lan.local.json`; tracked configs must contain placeholders only.
+- Run `python tools\secret_scan.py` before pushing public branches.
 
 ## Testing
 
@@ -258,6 +261,17 @@ For a full release-candidate pass with the same gates in one entry point:
 ```powershell
 python tools\release_smoke.py
 ```
+
+Before pushing a public branch, run the release gate and secret scan from a
+clean worktree:
+
+```powershell
+python tools\secret_scan.py
+python tools\release_smoke.py
+```
+
+The branch should have green CI, a clean GitGuardian result, and package audit
+status `ok` before it is treated as release-ready.
 
 The smoke runner exercises the local middleware pipeline without requiring the
 ONNX model. The effectiveness runner emits JSON to stdout and a summary table

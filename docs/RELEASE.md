@@ -41,11 +41,12 @@ python tools\release_smoke.py
 Expected result:
 
 - no tracked ignored files,
+- `python tools\secret_scan.py` reports no findings,
 - all CTest cases pass,
 - smoke runner reports zero failures,
 - effectiveness runner exits 0,
 - visualizer unit tests pass,
-- `--version` reports project version, build config, and commit,
+- `--version` reports project version, build config, and the current Git commit,
 - install prefix contains `preprocessor_app`, ONNX Runtime redistributables,
   and `LLMPreprocessorConfig.cmake`,
 - package audit passes with no runtime state, model files, or archive artifacts
@@ -74,6 +75,8 @@ Before using `--serve` outside a local test:
 
 - Copy `config.production.example.json` for loopback-local deployments or
   `config.lan.example.json` for secured non-loopback LAN deployments.
+- Keep copied local configs outside Git. Do not commit deployment tokens,
+  provider credentials, private model files, archives, or local SQLite state.
 - Replace every example local proxy token with a deployment-specific value
   before running health or serve on a copied LAN config.
 - Keep `proxy_forward_client_authorization` disabled when local proxy auth uses
@@ -85,12 +88,25 @@ Before using `--serve` outside a local test:
 - Review [Production Configuration](PRODUCTION_CONFIG.md) before non-loopback
   serving, and do not use `allow_unsafe_remote_proxy` for real deployments.
 
+## Public Push Checklist
+
+Before pushing a release branch to a public repository:
+
+- run `python tools\secret_scan.py`,
+- run `python tools\release_smoke.py`,
+- confirm `git ls-files -ci --exclude-standard` prints nothing,
+- confirm the package audit reports `status: ok`,
+- confirm GitGuardian or the repository secret-scanning provider is clean after
+  the branch is pushed,
+- confirm any LAN profile was copied privately and edited outside Git.
+
 ## CI Expectations
 
 The release workflow must pass on Windows, Linux, and macOS:
 
 - checkout,
 - tracked-ignored-file hygiene gate,
+- tracked-file secret scan,
 - ONNX Runtime download/extraction,
 - configure and build,
 - install smoke check,

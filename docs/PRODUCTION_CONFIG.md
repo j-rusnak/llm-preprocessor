@@ -23,8 +23,15 @@ Local proxy auth and upstream provider auth are separate controls:
 - Keep `proxy_forward_client_authorization: false` when clients use
   `Authorization` for provider credentials or when local proxy auth is enabled.
 
-Do not commit real provider keys. The tracked examples keep `upstream_api_key`
-empty so deployments can inject secrets locally.
+Do not commit actual provider credentials. The tracked examples keep
+`upstream_api_key` empty so deployments can inject secrets locally.
+
+Tracked example configs must stay placeholder-only. Copy them to a local file
+before adding deployment values, and verify the public tree with:
+
+```powershell
+python tools\secret_scan.py
+```
 
 ## Request Size Limit
 
@@ -52,6 +59,9 @@ The tracked LAN template is expected to fail health until its placeholder token
 is replaced. Placeholder-looking non-loopback bearer tokens containing markers
 such as `replace`, `change-me`, `changeme`, `placeholder`, or `example` are
 rejected by `ConfigLoader`.
+
+Keep the edited LAN config private. Public branches should contain only
+`config.lan.example.json`, not a copied deployment file.
 
 After health passes, start the proxy:
 

@@ -251,7 +251,9 @@ LAN config copied privately and token replaced outside Git.
 Run:
 
 ```powershell
-rg -n "profile-token|change-me-32chars|View secret|real provider key" README.md docs config*.json tests
+rg -n "profile-token|change-me-32chars|View secret|real provider key" `
+  README.md docs/RELEASE.md docs/PRODUCTION_CONFIG.md tests config.json config.example.json `
+  config.production.example.json config.lan.example.json
 ```
 
 Expected:
