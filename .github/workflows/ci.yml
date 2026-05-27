@@ -58,6 +58,10 @@ jobs:
             Write-Error "Tracked ignored files must be removed from the Git index:`n$($trackedIgnored -join "`n")"
           }
 
+      - name: Secret scan
+        shell: pwsh
+        run: python tools/secret_scan.py
+
       - name: Release smoke script dry run
         shell: pwsh
         run: python tools/release_smoke.py --dry-run --skip-playwright --skip-install

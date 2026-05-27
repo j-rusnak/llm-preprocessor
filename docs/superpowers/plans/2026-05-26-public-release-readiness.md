@@ -86,7 +86,8 @@ Create `tools/tests/test_secret_scan.py` with tests for:
 
 ```python
 def test_rejects_high_entropy_fixture_token():
-    sample = 'proxy_auth_bearer_tokens = ["fixture-token-alpha"]'
+    value = "fixture-token-" + "4f7c9a2b" + "8d6e1f03"
+    sample = f'proxy_auth_bearer_tokens = ["{value}"]'
     assert scan_text(sample)
 
 def test_allows_documented_placeholder():
