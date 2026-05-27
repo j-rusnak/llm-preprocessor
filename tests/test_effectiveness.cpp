@@ -517,6 +517,41 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
     }
 }
 
+TEST(Effectiveness_Retrieval, NearMissRegressionQueriesRankExpectedFileTop1) {
+    const auto root = repo_path("tests/fixtures/retrieval");
+    ASSERT_TRUE(fs::exists(root)) << root.string();
+
+    auto index = retrieval_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+    index->attach_symbol_graph(&graph, &extractor);
+    index->index_path(root.string());
+
+    struct QueryCase {
+        std::string query;
+        std::string expected_path_fragment;
+    };
+    const std::vector<QueryCase> cases = {
+        {
+            "markdown retrieval debugging near miss expected rank diagnostics",
+            "docs/retrieval-debugging.md"
+        },
+        {
+            "cpp stream forwarder cancel upstream on client disconnect idle timeout",
+            "realworld/cpp/stream_forwarder.cpp"
+        },
+    };
+
+    for (const auto& c : cases) {
+        const auto hits = index->search(c.query, 3);
+        ASSERT_FALSE(hits.empty()) << c.query;
+        std::string path = hits.front().chunk.file_path;
+        std::replace(path.begin(), path.end(), '\\', '/');
+        EXPECT_NE(path.find(c.expected_path_fragment), std::string::npos)
+            << "query=" << c.query << "\ntop1=" << path;
+    }
+}
+
 TEST(Effectiveness_Retrieval, FixtureGraphExpansionLiftsReferencedDefinitionTop3) {
     const auto root = repo_path("tests/fixtures/retrieval");
     ASSERT_TRUE(fs::exists(root / "cpp/login_controller.cpp")) << root.string();
