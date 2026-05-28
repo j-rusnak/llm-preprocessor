@@ -32,6 +32,13 @@ def _create_expected_install_tree(root: Path) -> None:
         "",
         encoding="utf-8",
     )
+    (
+        root
+        / "lib"
+        / "cmake"
+        / "LLMPreprocessor"
+        / "LLMPreprocessorConfigVersion.cmake"
+    ).write_text("", encoding="utf-8")
 
 
 class PackageAuditTests(unittest.TestCase):
@@ -51,13 +58,35 @@ class PackageAuditTests(unittest.TestCase):
             (root / "models").mkdir()
             (root / "models" / "model.ort").write_text("", encoding="utf-8")
             (root / "prompt_cache.db").write_text("", encoding="utf-8")
+            (root / "onnxruntime-win-x86-1.23.2").mkdir()
+            (root / "onnxruntime-win-x64-1.23.2").mkdir()
 
             result = audit_install_tree(root)
 
             self.assertEqual("fail", result["status"])
+            self.assertIn("models", result["forbidden"])
             self.assertIn("models/model.ort", result["forbidden"])
+            self.assertIn("onnxruntime-win-x86-1.23.2", result["forbidden"])
+            self.assertIn("onnxruntime-win-x64-1.23.2", result["forbidden"])
             self.assertIn("prompt_cache.db", result["forbidden"])
             self.assertIn("LLMPreprocessorConfig.cmake", result["missing"])
+
+    def test_requires_cmake_version_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _create_expected_install_tree(root)
+            (
+                root
+                / "lib"
+                / "cmake"
+                / "LLMPreprocessor"
+                / "LLMPreprocessorConfigVersion.cmake"
+            ).unlink()
+
+            result = audit_install_tree(root)
+
+            self.assertEqual("fail", result["status"])
+            self.assertIn("LLMPreprocessorConfigVersion.cmake", result["missing"])
 
     def test_rejects_missing_executable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

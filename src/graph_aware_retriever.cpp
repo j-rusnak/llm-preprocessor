@@ -112,8 +112,13 @@ expand_with_graph(const std::vector<RetrievedChunk>& seeds,
         if (seen.count(id)) continue;
         CodeChunk c;
         if (!index.try_get_chunk(id, c)) continue;
+        const float query_matches = query_match_count(terms, candidate, c);
+        if (!terms.empty() && seeds.size() > 1 && query_matches <= 0.0f) {
+            continue;
+        }
+
         const float rank =
-            cfg.query_match_weight * query_match_count(terms, candidate, c) +
+            cfg.query_match_weight * query_matches +
             cfg.reference_count_weight *
                 static_cast<float>(candidate.reference_count) +
             cfg.kind_weight * kind_priority(candidate.kind) -

@@ -32,8 +32,8 @@ HybridRetriever::search(const std::string& query_text,
     const bool exact_query = parsed_query.has_path_signal() ||
                              parsed_query.has_symbol_signal();
     const bool language_query = !parsed_query.language_hints.empty();
-    const float vector_weight = exact_query ? 0.25f : (language_query ? 0.0f : 1.0f);
-    const float keyword_weight = exact_query ? 8.0f : (language_query ? 5.0f : 1.75f);
+    const float vector_weight = exact_query ? 0.25f : (language_query ? 0.0f : 0.35f);
+    const float keyword_weight = exact_query ? 8.0f : (language_query ? 5.0f : 2.0f);
 
     struct Acc {
         float score = 0.0f;

@@ -4,6 +4,9 @@ This project is ready to release as local middleware only after the checks below
 pass from a clean checkout. A release candidate must not require generated
 runtime assets to be committed to Git.
 
+Use [Release Candidate Checklist](RC_CHECKLIST.md) for the exact public branch
+and tag sequence.
+
 ## Supported Release Target
 
 The current release target is a local developer middleware beta/RC:
@@ -41,16 +44,19 @@ python tools\release_smoke.py
 Expected result:
 
 - no tracked ignored files,
-- `python tools\secret_scan.py` reports no findings,
+- `python tools\secret_scan.py` and `python tools\secret_scan.py --ref HEAD`
+  report no findings,
 - all CTest cases pass,
 - smoke runner reports zero failures,
 - effectiveness runner exits 0,
 - visualizer unit tests pass,
 - `--version` reports project version, build config, and the current Git commit,
 - install prefix contains `preprocessor_app`, ONNX Runtime redistributables,
-  and `LLMPreprocessorConfig.cmake`,
+  `LLMPreprocessorConfig.cmake`, and `LLMPreprocessorConfigVersion.cmake`,
 - package audit passes with no runtime state, model files, or archive artifacts
-  in the install prefix.
+  in the install prefix,
+- `tools\artifact_checksums.py` writes a SHA256 manifest for the install or
+  package outputs.
 
 `tools/release_smoke.py` runs the dashboard browser smoke automatically when
 Python Playwright is installed. To run that check directly:
@@ -93,9 +99,12 @@ Before using `--serve` outside a local test:
 Before pushing a release branch to a public repository:
 
 - run `python tools\secret_scan.py`,
+- run `python tools\secret_scan.py --ref HEAD` and repeat `--ref` for each
+  selected public ref when publishing more than one branch or tag,
 - run `python tools\release_smoke.py`,
 - confirm `git ls-files -ci --exclude-standard` prints nothing,
 - confirm the package audit reports `status: ok`,
+- generate and retain `SHA256SUMS` with `python tools\artifact_checksums.py`,
 - confirm GitGuardian or the repository secret-scanning provider is clean after
   the branch is pushed,
 - confirm any LAN profile was copied privately and edited outside Git.
@@ -106,17 +115,17 @@ The release workflow must pass on Windows, Linux, and macOS:
 
 - checkout,
 - tracked-ignored-file hygiene gate,
-- tracked-file secret scan,
+- tracked-file and selected-ref secret/artifact scans,
+- release smoke dry run,
 - ONNX Runtime download/extraction,
 - configure and build,
 - install smoke check,
 - package audit,
+- SHA256 checksum generation,
 - CTest,
 - smoke runner,
 - effectiveness runner,
 - visualizer unit tests,
 - optional Playwright dashboard smoke when Python Playwright is available.
-- `tools/release_smoke.py --dry-run --skip-playwright --skip-install`, so the
-  unified gate stays syntactically valid across the matrix.
 
 Do not tag a release if any matrix leg fails.

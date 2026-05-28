@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 
 using nlohmann::json;
 
@@ -183,6 +184,22 @@ TEST(OpenAIProxy, Healthz) {
     EXPECT_EQ(r->status, 200);
 }
 
+TEST(OpenAIProxy, HealthzRemainsPublicWhenProxyAuthConfigured) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"local-token"};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Get("/healthz");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+    EXPECT_EQ(r->body, "ok");
+}
+
 TEST(OpenAIProxy, ForwardsAndCachesAndMeasures) {
     ProxyHarness h;
     FakeUpstream up;
@@ -333,6 +350,27 @@ TEST(OpenAIProxy, AuthRejectsMissingBearerBeforeUpstream) {
     EXPECT_EQ(metrics["auth_failures_total"], 1u);
 }
 
+TEST(OpenAIProxy, StatsRequiresConfiguredAuth) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"stats-token"};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto missing = cli.Get("/stats");
+    ASSERT_TRUE(missing);
+    EXPECT_EQ(missing->status, 401);
+
+    httplib::Headers headers{{"X-Preprocessor-Authorization",
+                              "Bearer stats-token"}};
+    auto allowed = cli.Get("/stats", headers);
+    ASSERT_TRUE(allowed);
+    EXPECT_EQ(allowed->status, 200);
+    EXPECT_TRUE(json::parse(allowed->body).contains("requests_total"));
+}
+
 TEST(OpenAIProxy, AuthAllowsBearerAndDoesNotLeakLocalTokenWhenDisabledForwarding) {
     ProxyHarness h;
     FakeUpstream up;
@@ -354,6 +392,185 @@ TEST(OpenAIProxy, AuthAllowsBearerAndDoesNotLeakLocalTokenWhenDisabledForwarding
     EXPECT_EQ(r->status, 200);
     EXPECT_EQ(up.calls.load(), 1);
     EXPECT_EQ(up.last_authorization, "Bearer upstream-token");
+}
+
+TEST(OpenAIProxy, AuthPrefersPreprocessorHeaderAndCanForwardClientAuthorization) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"local-token"};
+    cfg.forward_client_authorization = true;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"messages", json::array({{{"role", "user"}, {"content", "hello"}}})}
+    };
+    httplib::Headers headers{
+        {"X-Preprocessor-Authorization", "Bearer local-token"},
+        {"Authorization", "Bearer upstream-client-token"}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/v1/chat/completions", headers, body.dump(),
+                      "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+    EXPECT_EQ(up.calls.load(), 1);
+    EXPECT_EQ(up.last_authorization, "Bearer upstream-client-token");
+}
+
+TEST(OpenAIProxy, HmacAuthRejectsSkewSignatureMismatchAndBodyMismatch) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.hmac_secret = "shared-hmac-secret";
+    cfg.auth.max_clock_skew = std::chrono::seconds{60};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    const std::int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    const std::string body =
+        R"({"model":"gpt-test","messages":[{"role":"user","content":"hello"}]})";
+    const std::string valid_sig =
+        preprocessor::AuthMiddleware::sign("shared-hmac-secret", now, body);
+
+    httplib::Client cli("127.0.0.1", h.port);
+
+    httplib::Headers skewed_headers{
+        {"X-Preprocessor-Timestamp", std::to_string(now - 3600)},
+        {"X-Preprocessor-Signature",
+         preprocessor::AuthMiddleware::sign("shared-hmac-secret", now - 3600, body)}
+    };
+    auto skewed = cli.Post("/v1/chat/completions", skewed_headers, body,
+                           "application/json");
+    ASSERT_TRUE(skewed);
+    EXPECT_EQ(skewed->status, 401);
+
+    std::string mismatched_sig = valid_sig;
+    mismatched_sig[0] = mismatched_sig[0] == '0' ? '1' : '0';
+    httplib::Headers mismatched_sig_headers{
+        {"X-Preprocessor-Timestamp", std::to_string(now)},
+        {"X-Preprocessor-Signature", mismatched_sig}
+    };
+    auto bad_sig = cli.Post("/v1/chat/completions", mismatched_sig_headers,
+                            body, "application/json");
+    ASSERT_TRUE(bad_sig);
+    EXPECT_EQ(bad_sig->status, 401);
+
+    httplib::Headers body_mismatch_headers{
+        {"X-Preprocessor-Timestamp", std::to_string(now)},
+        {"X-Preprocessor-Signature",
+         preprocessor::AuthMiddleware::sign("shared-hmac-secret", now,
+                                            body + " ")}
+    };
+    auto body_mismatch = cli.Post("/v1/chat/completions",
+                                  body_mismatch_headers, body,
+                                  "application/json");
+    ASSERT_TRUE(body_mismatch);
+    EXPECT_EQ(body_mismatch->status, 401);
+    EXPECT_EQ(up.calls.load(), 0);
+}
+
+TEST(OpenAIProxy, HmacAuthFailuresHaveSameObservableHttpResult) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.hmac_secret = "shared-hmac-secret";
+    cfg.auth.max_clock_skew = std::chrono::seconds{60};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    const std::int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    const std::string body =
+        R"({"model":"gpt-test","messages":[{"role":"user","content":"hello"}]})";
+    const std::string valid_sig =
+        preprocessor::AuthMiddleware::sign("shared-hmac-secret", now, body);
+    std::string mismatched_sig = valid_sig;
+    mismatched_sig.back() = mismatched_sig.back() == '0' ? '1' : '0';
+
+    httplib::Client cli("127.0.0.1", h.port);
+    httplib::Headers skewed_headers{
+        {"X-Preprocessor-Timestamp", std::to_string(now - 3600)},
+        {"X-Preprocessor-Signature",
+         preprocessor::AuthMiddleware::sign("shared-hmac-secret", now - 3600, body)}
+    };
+    auto baseline = cli.Post("/v1/chat/completions", skewed_headers, body,
+                             "application/json");
+    ASSERT_TRUE(baseline);
+    ASSERT_EQ(baseline->status, 401);
+
+    for (const httplib::Headers& headers : {
+             httplib::Headers{
+                 {"X-Preprocessor-Timestamp", std::to_string(now)},
+                 {"X-Preprocessor-Signature", mismatched_sig}},
+             httplib::Headers{
+                 {"X-Preprocessor-Timestamp", std::to_string(now)},
+                 {"X-Preprocessor-Signature",
+                  preprocessor::AuthMiddleware::sign("shared-hmac-secret", now,
+                                                     body + " ")}}}) {
+        auto r = cli.Post("/v1/chat/completions", headers, body,
+                          "application/json");
+        ASSERT_TRUE(r);
+        EXPECT_EQ(r->status, baseline->status);
+        EXPECT_EQ(r->get_header_value("Content-Type"),
+                  baseline->get_header_value("Content-Type"));
+        EXPECT_EQ(r->body, baseline->body);
+    }
+    EXPECT_EQ(up.calls.load(), 0);
+}
+
+TEST(AuthMiddlewareTest, HmacRejectsTimestampSkewSignatureMismatchAndBodyMismatch) {
+    preprocessor::AuthMiddleware::Config cfg;
+    cfg.hmac_secret = "shared-hmac-secret";
+    cfg.max_clock_skew = std::chrono::seconds{60};
+    preprocessor::AuthMiddleware auth(cfg);
+
+    const std::int64_t now = 1700000000;
+    const std::string body = R"({"hello":"world"})";
+    const std::string valid_sig =
+        preprocessor::AuthMiddleware::sign(cfg.hmac_secret, now, body);
+
+    EXPECT_FALSE(auth.verify("", valid_sig, std::to_string(now - 61),
+                             body, now));
+
+    std::string mismatched_sig = valid_sig;
+    mismatched_sig[5] = mismatched_sig[5] == '0' ? '1' : '0';
+    EXPECT_FALSE(auth.verify("", mismatched_sig, std::to_string(now),
+                             body, now));
+
+    EXPECT_FALSE(auth.verify("", valid_sig, std::to_string(now),
+                             body + " ", now));
+    EXPECT_TRUE(auth.verify("", valid_sig, std::to_string(now), body, now));
+}
+
+TEST(AuthMiddlewareTest, HmacInvalidInputsReturnFalseWithoutThrowing) {
+    preprocessor::AuthMiddleware::Config cfg;
+    cfg.hmac_secret = "shared-hmac-secret";
+    preprocessor::AuthMiddleware auth(cfg);
+
+    const std::int64_t now = 1700000000;
+    const std::string body = "body";
+    const std::string valid_sig =
+        preprocessor::AuthMiddleware::sign(cfg.hmac_secret, now, body);
+    std::string mismatched_sig = valid_sig;
+    mismatched_sig[0] = mismatched_sig[0] == '0' ? '1' : '0';
+
+    for (const auto& candidate :
+         {std::tuple<std::string, std::string, std::string>{
+              mismatched_sig, std::to_string(now), body},
+          std::tuple<std::string, std::string, std::string>{
+              valid_sig, std::to_string(now), body + "x"},
+          std::tuple<std::string, std::string, std::string>{
+              valid_sig, "not-a-timestamp", body}}) {
+        EXPECT_FALSE(auth.verify("", std::get<0>(candidate),
+                                 std::get<1>(candidate),
+                                 std::get<2>(candidate), now));
+    }
 }
 
 TEST(OpenAIProxy, RateLimitRejectsBeforeCacheOrUpstream) {
@@ -401,6 +618,35 @@ TEST(OpenAIProxy, RequestBodyTooLargeReturns413BeforeUpstream) {
 
     const auto metrics = h.metrics.snapshot();
     EXPECT_EQ(metrics["request_too_large_denials_total"], 1u);
+}
+
+TEST(OpenAIProxy, RequestSizeLimitPrecedesJsonParsingOnAllBodyRoutes) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.max_request_bytes = 8;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    httplib::Client cli("127.0.0.1", h.port);
+    const std::string oversized_invalid_json = "{ this is not json and exceeds }";
+
+    auto chat = cli.Post("/v1/chat/completions", oversized_invalid_json,
+                         "application/json");
+    ASSERT_TRUE(chat);
+    EXPECT_EQ(chat->status, 413);
+
+    auto cache = cli.Post("/sync/cache", oversized_invalid_json,
+                          "application/json");
+    ASSERT_TRUE(cache);
+    EXPECT_EQ(cache->status, 413);
+
+    auto vectors = cli.Post("/sync/vectors", oversized_invalid_json,
+                            "application/json");
+    ASSERT_TRUE(vectors);
+    EXPECT_EQ(vectors->status, 413);
+
+    EXPECT_EQ(up.calls.load(), 0);
 }
 
 TEST(OpenAIProxy, UpstreamResponseTooLargeReturns502AndDoesNotCache) {
@@ -817,6 +1063,26 @@ TEST(OpenAIProxy, SyncCacheExportRequiresConfiguredAuth) {
     EXPECT_EQ(r->status, 401);
 }
 
+TEST(OpenAIProxy, SyncCacheImportRequiresConfiguredAuth) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"sync-token"};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    preprocessor::SyncEndpoint sync;
+    preprocessor::SyncBundle bundle;
+    bundle.cache.push_back({"team-key", "team-payload"});
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/sync/cache", sync.to_json(bundle), "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 401);
+    EXPECT_FALSE(h.cache.get("team-key").has_value());
+}
+
 TEST(OpenAIProxy, SyncCacheImportAndExportWithAuth) {
     ProxyHarness h;
     FakeUpstream up;
@@ -860,6 +1126,36 @@ TEST(OpenAIProxy, SyncVectorExportRequiresConfiguredAuth) {
 
     ASSERT_TRUE(r);
     EXPECT_EQ(r->status, 401);
+}
+
+TEST(OpenAIProxy, SyncVectorImportRequiresConfiguredAuth) {
+    ProxyHarness h;
+    FakeUpstream up;
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.auth.bearer_tokens = {"sync-token"};
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    preprocessor::SyncEndpoint sync;
+    preprocessor::SyncBundle bundle;
+    preprocessor::SyncVectorEntry vector;
+    vector.chunk_id = 77;
+    vector.vec = std::vector<float>(16, 0.0f);
+    vector.vec[0] = 1.0f;
+    vector.source_path = "team/unauth.cpp";
+    vector.text = "void unauth_symbol() {}";
+    vector.start_line = 1;
+    vector.end_line = 1;
+    vector.symbol = "unauth_symbol";
+    bundle.vectors.push_back(vector);
+
+    httplib::Client cli("127.0.0.1", h.port);
+    auto r = cli.Post("/sync/vectors", sync.to_json(bundle),
+                      "application/json");
+
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 401);
+    EXPECT_EQ(h.index.chunk_count(), 0u);
 }
 
 TEST(OpenAIProxy, SyncVectorImportAndExportWithAuth) {

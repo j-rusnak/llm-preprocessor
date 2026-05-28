@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import importlib.util
 import os
 import shutil
@@ -15,6 +16,87 @@ def _is_windows() -> bool:
 
 def _exe_name(name: str) -> str:
     return f"{name}.exe" if _is_windows() else name
+
+
+def _has_msvc_build_environment(env: Mapping[str, str] | None = None) -> bool:
+    values = os.environ if env is None else env
+    return bool(values.get("INCLUDE") and values.get("LIB") and values.get("VCToolsInstallDir"))
+
+
+def _parse_environment_block(output: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for line in output.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key:
+            parsed[key] = value
+    return parsed
+
+
+def _find_vsdevcmd() -> Path | None:
+    program_files_x86 = os.environ.get("ProgramFiles(x86)")
+    if program_files_x86:
+        vswhere = Path(program_files_x86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+        if vswhere.exists():
+            result = subprocess.run(
+                [
+                    str(vswhere),
+                    "-latest",
+                    "-products",
+                    "*",
+                    "-requires",
+                    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                    "-property",
+                    "installationPath",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            install_root = result.stdout.strip().splitlines()
+            if install_root:
+                candidate = Path(install_root[0]) / "Common7" / "Tools" / "VsDevCmd.bat"
+                if candidate.exists():
+                    return candidate
+
+    roots = [
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Microsoft Visual Studio" / version
+        for version in ("18", "2022")
+    ]
+    editions = ("Enterprise", "Professional", "Community", "BuildTools")
+    for root in roots:
+        for edition in editions:
+            candidate = root / edition / "Common7" / "Tools" / "VsDevCmd.bat"
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def _vsdevcmd_environment_command(vsdevcmd: Path) -> str:
+    return f'cmd.exe /d /s /c ""{vsdevcmd}" -arch=x64 >nul && set"'
+
+
+def _ensure_windows_build_environment(*, dry_run: bool) -> None:
+    if dry_run or not _is_windows() or _has_msvc_build_environment():
+        return
+    vsdevcmd = _find_vsdevcmd()
+    if vsdevcmd is None:
+        raise RuntimeError(
+            "Visual Studio C++ build environment was not detected and VsDevCmd.bat "
+            "could not be found. Install MSVC build tools or run from a Developer shell."
+        )
+    result = subprocess.run(
+        _vsdevcmd_environment_command(vsdevcmd),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    os.environ.update(_parse_environment_block(result.stdout))
+    if not _has_msvc_build_environment():
+        raise RuntimeError(
+            "VsDevCmd.bat completed but did not provide INCLUDE, LIB, and VCToolsInstallDir."
+        )
 
 
 def _find_executable(build_dir: Path, config: str, name: str) -> Path:
@@ -171,6 +253,23 @@ def main(argv: list[str] | None = None) -> int:
         _check_tracked_ignored(repo_root, dry_run=args.dry_run)
 
         _run(
+            "Secret and artifact scan",
+            [sys.executable, "tools/secret_scan.py"],
+            cwd=repo_root,
+            dry_run=args.dry_run,
+            timeout_seconds=args.command_timeout_sec,
+        )
+        _run(
+            "Selected-ref history scan",
+            [sys.executable, "tools/secret_scan.py", "--ref", "HEAD"],
+            cwd=repo_root,
+            dry_run=args.dry_run,
+            timeout_seconds=args.command_timeout_sec,
+        )
+
+        _ensure_windows_build_environment(dry_run=args.dry_run)
+
+        _run(
             "Configure",
             ["cmake", "-S", str(repo_root), "-B", str(build_dir)],
             cwd=repo_root,
@@ -305,6 +404,19 @@ def main(argv: list[str] | None = None) -> int:
             _run(
                 "Package audit",
                 [sys.executable, "tools/package_audit.py", str(install_prefix)],
+                cwd=repo_root,
+                dry_run=args.dry_run,
+                timeout_seconds=args.command_timeout_sec,
+            )
+            _run(
+                "Artifact checksums",
+                [
+                    sys.executable,
+                    "tools/artifact_checksums.py",
+                    str(install_prefix),
+                    "--output",
+                    str(build_dir / "install-check.SHA256SUMS"),
+                ],
                 cwd=repo_root,
                 dry_run=args.dry_run,
                 timeout_seconds=args.command_timeout_sec,

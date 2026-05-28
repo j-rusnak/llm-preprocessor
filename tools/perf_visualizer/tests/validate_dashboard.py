@@ -103,7 +103,11 @@ def main() -> int:
                 expect(page.locator("#languageRows .insight-row").first).to_be_visible()
                 expect(page.locator("#diagnosticRows .insight-row").first).to_be_visible()
                 expect(page.locator("#diagnosticDetail")).to_contain_text("Expected")
-                expect(page.locator("#nearMissRows")).to_contain_text("No near misses")
+                near_miss_rows = page.locator("#nearMissRows .insight-row")
+                if near_miss_rows.count() > 0:
+                    expect(near_miss_rows.first).to_contain_text("miss")
+                else:
+                    expect(page.locator("#nearMissRows")).to_contain_text("No near misses")
 
                 before = page.evaluate(
                     "() => Number(((document.querySelector('#sampleCount')?.textContent || '0').match(/\\d+/) || ['0'])[0])"

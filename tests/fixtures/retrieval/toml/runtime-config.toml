@@ -1,0 +1,16 @@
+[proxy]
+bind_host = "127.0.0.1"
+port = 8080
+max_request_bytes = 1048576
+unsafe_allow_remote_proxy = false
+local_auth_header = "X-Preprocessor-Authorization"
+
+[upstream.openai]
+base_url = "https://api.openai.com/v1"
+auth_env = "OPENAI_API_KEY"
+timeout_ms = 30000
+
+[retrieval]
+max_chunks = 8
+graph_expansion = true
+similarity_threshold = 0.08

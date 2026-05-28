@@ -46,6 +46,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
@@ -207,6 +208,50 @@ std::string normalized_path(std::string path) {
 
 bool path_contains_fragment(const std::string& path, const std::string& fragment) {
     return normalized_path(path).find(fragment) != std::string::npos;
+}
+
+std::string lower_ascii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    return value;
+}
+
+std::vector<std::string> informative_query_terms(const std::string& query) {
+    static const std::unordered_set<std::string> ignored = {
+        "cpp", "typescript", "python", "rust", "java", "yaml", "sql",
+        "toml", "cmake", "markdown", "docs", "the", "and", "for", "with"
+    };
+    std::vector<std::string> terms;
+    std::string current;
+    for (unsigned char c : query) {
+        if (std::isalnum(c)) {
+            current.push_back(static_cast<char>(std::tolower(c)));
+            continue;
+        }
+        if (current.size() >= 4 && ignored.count(current) == 0 &&
+            std::find(terms.begin(), terms.end(), current) == terms.end()) {
+            terms.push_back(current);
+        }
+        current.clear();
+    }
+    if (current.size() >= 4 && ignored.count(current) == 0 &&
+        std::find(terms.begin(), terms.end(), current) == terms.end()) {
+        terms.push_back(current);
+    }
+    return terms;
+}
+
+bool chunk_matches_any_query_term(const preprocessor::CodeChunk& chunk,
+                                  const std::vector<std::string>& terms) {
+    if (terms.empty()) return true;
+    const std::string haystack = lower_ascii(
+        chunk.file_path + " " + chunk.symbol + " " + chunk.text);
+    for (const auto& term : terms) {
+        if (haystack.find(term) != std::string::npos) return true;
+    }
+    return false;
 }
 
 bool find_chunk_by_path_fragment(const preprocessor::RepoIndex& index,
@@ -617,6 +662,7 @@ json measure_graph_retrieval() {
     const bool base_top3 = in_top(seeds, "security.cpp", 3);
     const bool expanded_top3 = in_top(expanded, "security.cpp", 3);
     const bool polluted = in_top(expanded, "payments.cpp", expanded.size());
+    const int unrelated_pollution_count = polluted ? 1 : 0;
 
     return {
         {"seed_count", seeds.size()},
@@ -625,6 +671,8 @@ json measure_graph_retrieval() {
         {"expanded_top3_hit", expanded_top3},
         {"top3_lift", expanded_top3 && !base_top3},
         {"unrelated_pollution", polluted},
+        {"unrelated_pollution_count", unrelated_pollution_count},
+        {"unrelated_pollution_queries", polluted ? 1 : 0},
     };
 }
 
@@ -800,6 +848,30 @@ json measure_fixture_retrieval() {
             "cpp stream forwarder cancel upstream on client disconnect idle timeout",
             "realworld/cpp/stream_forwarder.cpp"
         },
+        {
+            "cpp",
+            "config",
+            "config validation rejects non loopback bind address unsafe_allow_remote_proxy max_request_bytes json parsing",
+            "cpp/config_loader_slice.cpp"
+        },
+        {
+            "yaml",
+            "ci",
+            "yaml github actions ci windows vsdevcmd ctest smoke effectiveness upload release artifacts",
+            "yaml/github-actions-ci.yml"
+        },
+        {
+            "cmake",
+            "release",
+            "cmake release package staging sha256 checksum artifact publishing",
+            "cmake/release-package.cmake"
+        },
+        {
+            "toml",
+            "config",
+            "toml runtime config proxy bind_host max_request_bytes upstream openai auth_env graph expansion",
+            "toml/runtime-config.toml"
+        },
     };
 
     struct QueryAggregate {
@@ -825,11 +897,15 @@ json measure_fixture_retrieval() {
 
         bool found = false;
         int expected_rank = 0;
+        double expected_score = 0.0;
+        double top1_score = hits.empty() ? 0.0 : hits.front().score;
+        std::string top1_path;
         json top_k = json::array();
         for (std::size_t i = 0; i < hits.size(); ++i) {
             const auto& hit = hits[i];
             std::string path = hit.chunk.file_path;
             std::replace(path.begin(), path.end(), '\\', '/');
+            if (i == 0) top1_path = path;
             top_k.push_back({
                 {"rank", i + 1},
                 {"path", path},
@@ -838,6 +914,7 @@ json measure_fixture_retrieval() {
             });
             if (path.find(c.expected_path_fragment) != std::string::npos) {
                 if (expected_rank == 0) expected_rank = static_cast<int>(i + 1);
+                if (expected_score == 0.0) expected_score = hit.score;
                 if (i < 3) found = true;
             }
         }
@@ -853,6 +930,30 @@ json measure_fixture_retrieval() {
         const auto graph_expanded_count = expanded.size() > hits.size()
             ? expanded.size() - hits.size()
             : 0u;
+        const auto query_terms = informative_query_terms(c.query);
+        int unrelated_expanded_count = 0;
+        json expanded_tail = json::array();
+        for (std::size_t i = hits.size(); i < expanded.size(); ++i) {
+            const auto& expanded_hit = expanded[i];
+            const bool related =
+                chunk_matches_any_query_term(expanded_hit.chunk, query_terms);
+            if (!related) ++unrelated_expanded_count;
+            expanded_tail.push_back({
+                {"rank", i + 1},
+                {"path", normalized_path(expanded_hit.chunk.file_path)},
+                {"score", expanded_hit.score},
+                {"query_related", related},
+            });
+        }
+        bool expanded_top3_hit = false;
+        const std::size_t expanded_top3_limit = (std::min)(std::size_t{3}, expanded.size());
+        for (std::size_t i = 0; i < expanded_top3_limit; ++i) {
+            if (path_contains_fragment(expanded[i].chunk.file_path,
+                                       c.expected_path_fragment)) {
+                expanded_top3_hit = true;
+                break;
+            }
+        }
 
         if (top1_hit) ++top1;
         if (found) ++top3;
@@ -873,12 +974,18 @@ json measure_fixture_retrieval() {
             {"query", c.query},
             {"expected", c.expected_path_fragment},
             {"expected_rank", expected_rank == 0 ? json(nullptr) : json(expected_rank)},
+            {"actual_top1", top1_path},
             {"top1_hit", top1_hit},
             {"top3_hit", found},
             {"reciprocal_rank", reciprocal_rank},
             {"query_us", query_us},
             {"top_k", top_k},
+            {"score_gap_to_top1",
+             expected_rank == 0 ? json(nullptr) : json(top1_score - expected_score)},
             {"graph_expanded_count", graph_expanded_count},
+            {"expanded_top3_hit", expanded_top3_hit},
+            {"graph_unrelated_expanded_count", unrelated_expanded_count},
+            {"expanded_tail", expanded_tail},
         });
     }
 
@@ -972,11 +1079,15 @@ json measure_fixture_retrieval() {
     json diagnostics = json::array();
     json near_misses = json::array();
     int graph_expanded_queries = 0;
+    int graph_pollution_queries = 0;
     for (const auto& row : diagnostic_rows) {
         diagnostics.push_back(row);
-        if (!row.value("top3_hit", false)) near_misses.push_back(row);
+        if (!row.value("top1_hit", false)) near_misses.push_back(row);
         if (row.value("graph_expanded_count", 0u) > 0) {
             ++graph_expanded_queries;
+        }
+        if (row.value("graph_unrelated_expanded_count", 0) > 0) {
+            ++graph_pollution_queries;
         }
     }
 
@@ -995,6 +1106,7 @@ json measure_fixture_retrieval() {
         {"near_misses", near_misses},
         {"slowest_queries", slowest},
         {"graph_expanded_queries", graph_expanded_queries},
+        {"graph_pollution_queries", graph_pollution_queries},
         {"graph_lift_queries", graph_lift_queries},
         {"graph_lift_cases", graph_lift_rows},
     };
@@ -1206,8 +1318,27 @@ void print_summary(const json& report) {
 
     const auto& fr = report["fixture_retrieval"];
     s << "[FixtureRetrieval]     "<<fr["files"]<<" files / "<<fr["queries"]
-      <<" queries | top-3 "<<pct(fr["top3_pct"])
+      <<" queries | top-1 "<<pct(fr["top1_pct"])
+      <<" | top-3 "<<pct(fr["top3_pct"])
+      <<" | graph pollution queries="<<fr["graph_pollution_queries"]
+      <<" | near misses="<<fr["near_misses"].size()
       <<" | "<<us(fr["avg_query_us"])<<"/query\n";
+
+    s << "  by language:";
+    for (auto it = fr["by_language"].begin(); it != fr["by_language"].end(); ++it) {
+        const auto& row = it.value();
+        s << " " << it.key() << "=" << pct(row["top1_pct"]) << "/"
+          << pct(row["top3_pct"]);
+    }
+    s << "\n";
+
+    s << "  by category:";
+    for (auto it = fr["by_category"].begin(); it != fr["by_category"].end(); ++it) {
+        const auto& row = it.value();
+        s << " " << it.key() << "=" << pct(row["top1_pct"]) << "/"
+          << pct(row["top3_pct"]);
+    }
+    s << "\n";
 
     const auto& mr = report["model_router"];
     s << "[ModelRouter]          "<<mr["correct"]<<"/"<<mr["cases"]
@@ -1257,5 +1388,29 @@ int main() {
 
     print_summary(report);
     std::cout << report.dump(2) << "\n";
-    return 0;
+
+    bool thresholds_ok = true;
+    const auto& fixture = report["fixture_retrieval"];
+    if (fixture.value("top3_pct", 0.0) < 95.0) {
+        std::cerr << "[THRESHOLD] fixture retrieval top-3 below 95%: "
+                  << fixture["top3_pct"] << "\n";
+        thresholds_ok = false;
+    }
+    if (fixture.value("top1_pct", 0.0) < 85.0) {
+        std::cerr << "[THRESHOLD] fixture retrieval top-1 below 85%: "
+                  << fixture["top1_pct"] << "\n";
+        thresholds_ok = false;
+    }
+    if (fixture.value("graph_pollution_queries", 0) != 0) {
+        std::cerr << "[THRESHOLD] fixture graph pollution queries: "
+                  << fixture["graph_pollution_queries"] << "\n";
+        thresholds_ok = false;
+    }
+    const auto& graph = report["graph_retrieval"];
+    if (graph.value("unrelated_pollution_count", 0) != 0) {
+        std::cerr << "[THRESHOLD] graph retrieval unrelated pollution count: "
+                  << graph["unrelated_pollution_count"] << "\n";
+        thresholds_ok = false;
+    }
+    return thresholds_ok ? 0 : 2;
 }

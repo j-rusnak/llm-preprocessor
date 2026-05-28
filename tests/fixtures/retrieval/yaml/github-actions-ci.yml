@@ -1,0 +1,33 @@
+name: preprocessor-ci
+
+on:
+  pull_request:
+  push:
+    branches: [polish-features, main]
+
+jobs:
+  windows-build-test:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Visual Studio developer shell
+        shell: cmd
+        run: |
+          "C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
+      - name: Build
+        shell: cmd
+        run: cmake --build build --config Release
+      - name: Focused effectiveness tests
+        shell: cmd
+        run: build\preprocessor_tests.exe --gtest_filter=Effectiveness_Retrieval.*
+      - name: Full verification
+        shell: cmd
+        run: |
+          ctest --test-dir build --output-on-failure
+          build\smoke_runner.exe
+          build\effectiveness_runner.exe
+      - name: Upload release package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-preprocessor-windows-release
+          path: build\artifacts\*

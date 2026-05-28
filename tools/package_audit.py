@@ -8,15 +8,32 @@ from pathlib import Path
 
 FORBIDDEN_SUFFIXES = {
     ".db",
-    ".sqlite",
-    ".sqlite3",
+    ".gz",
     ".onnx",
     ".ort",
-    ".zip",
+    ".sqlite",
+    ".sqlite3",
+    ".tar",
+    ".tar.gz",
+    ".tar.xz",
+    ".tar.bz2",
     ".tgz",
+    ".zip",
 }
 
 REQUIRED_CONFIG = Path("lib/cmake/LLMPreprocessor/LLMPreprocessorConfig.cmake")
+REQUIRED_CONFIG_VERSION = Path(
+    "lib/cmake/LLMPreprocessor/LLMPreprocessorConfigVersion.cmake"
+)
+FORBIDDEN_DIR_NAMES = {
+    "models",
+}
+FORBIDDEN_DIR_PREFIXES = (
+    "onnxruntime-win-x64-",
+    "onnxruntime-win-x86-",
+    "onnxruntime-linux-x64-",
+    "onnxruntime-osx-",
+)
 
 
 def _required_executable() -> Path:
@@ -35,6 +52,7 @@ def _required_runtime_library() -> Path:
 def _required_files() -> list[Path]:
     return [
         REQUIRED_CONFIG,
+        REQUIRED_CONFIG_VERSION,
         _required_executable(),
         _required_runtime_library(),
     ]
@@ -45,9 +63,23 @@ def _relative_name(path: Path, root: Path) -> str:
 
 
 def _missing_name(required: Path) -> str:
-    if required == REQUIRED_CONFIG:
+    if required in {REQUIRED_CONFIG, REQUIRED_CONFIG_VERSION}:
         return required.name
     return required.as_posix()
+
+
+def _has_forbidden_suffix(path: Path) -> bool:
+    name = path.name.lower()
+    return path.suffix.lower() in FORBIDDEN_SUFFIXES or any(
+        name.endswith(suffix) for suffix in FORBIDDEN_SUFFIXES if suffix.count(".") > 1
+    )
+
+
+def _is_forbidden_dir(path: Path) -> bool:
+    name = path.name.lower()
+    return name in FORBIDDEN_DIR_NAMES or any(
+        name.startswith(prefix) for prefix in FORBIDDEN_DIR_PREFIXES
+    )
 
 
 def audit_install_tree(root: str | Path) -> dict[str, object]:
@@ -57,7 +89,9 @@ def audit_install_tree(root: str | Path) -> dict[str, object]:
 
     if install_root.exists():
         for path in install_root.rglob("*"):
-            if path.is_file() and path.suffix.lower() in FORBIDDEN_SUFFIXES:
+            if path.is_dir() and _is_forbidden_dir(path):
+                forbidden.append(_relative_name(path, install_root))
+            elif path.is_file() and _has_forbidden_suffix(path):
                 forbidden.append(_relative_name(path, install_root))
     else:
         missing.append(str(install_root))

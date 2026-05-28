@@ -5,8 +5,11 @@ import unittest
 from pathlib import Path
 
 from tools.release_smoke import (
+    _has_msvc_build_environment,
+    _parse_environment_block,
     _validate_install_prefix_cleanup,
     _verify_version_commit,
+    _vsdevcmd_environment_command,
 )
 
 
@@ -67,6 +70,41 @@ class ReleaseSmokeTests(unittest.TestCase):
                 version_output="LLM Preprocessor v1.0.0 (Debug, commit old1234)\n",
                 head_commit="new5678",
             )
+
+    def test_detects_complete_msvc_build_environment(self) -> None:
+        self.assertTrue(
+            _has_msvc_build_environment(
+                {
+                    "INCLUDE": r"C:\VS\include",
+                    "LIB": r"C:\VS\lib",
+                    "VCToolsInstallDir": r"C:\VS\VC\Tools\MSVC",
+                }
+            )
+        )
+
+    def test_rejects_incomplete_msvc_build_environment(self) -> None:
+        self.assertFalse(
+            _has_msvc_build_environment(
+                {
+                    "INCLUDE": r"C:\VS\include",
+                    "VCToolsInstallDir": r"C:\VS\VC\Tools\MSVC",
+                }
+            )
+        )
+
+    def test_parses_windows_environment_block(self) -> None:
+        self.assertEqual(
+            _parse_environment_block("INCLUDE=C:\\VS\\include\nPath=C:\\VS\\bin\nnoise\n"),
+            {"INCLUDE": "C:\\VS\\include", "Path": "C:\\VS\\bin"},
+        )
+
+    def test_builds_vsdevcmd_environment_capture_command(self) -> None:
+        self.assertEqual(
+            _vsdevcmd_environment_command(
+                Path(r"C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\Tools\VsDevCmd.bat")
+            ),
+            'cmd.exe /d /s /c ""C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\Common7\\Tools\\VsDevCmd.bat" -arch=x64 >nul && set"',
+        )
 
 
 if __name__ == "__main__":

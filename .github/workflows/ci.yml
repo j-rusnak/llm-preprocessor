@@ -60,7 +60,9 @@ jobs:
 
       - name: Secret scan
         shell: pwsh
-        run: python tools/secret_scan.py
+        run: |
+          python tools/secret_scan.py
+          python tools/secret_scan.py --ref HEAD
 
       - name: Release smoke script dry run
         shell: pwsh
@@ -135,6 +137,7 @@ jobs:
             }
           }
           python tools/package_audit.py build/install-check
+          python tools/artifact_checksums.py build/install-check --output build/install-check.SHA256SUMS
 
       - name: Unit tests
         shell: pwsh

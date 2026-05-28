@@ -498,6 +498,22 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
             "cpp stream forwarder cancel upstream on client disconnect idle timeout",
             "realworld/cpp/stream_forwarder.cpp"
         },
+        {
+            "config validation rejects non loopback bind address unsafe_allow_remote_proxy max_request_bytes json parsing",
+            "cpp/config_loader_slice.cpp"
+        },
+        {
+            "yaml github actions ci windows vsdevcmd ctest smoke effectiveness upload release artifacts",
+            "yaml/github-actions-ci.yml"
+        },
+        {
+            "cmake release package staging sha256 checksum artifact publishing",
+            "cmake/release-package.cmake"
+        },
+        {
+            "toml runtime config proxy bind_host max_request_bytes upstream openai auth_env graph expansion",
+            "toml/runtime-config.toml"
+        },
     };
 
     for (const auto& c : cases) {
@@ -515,6 +531,112 @@ TEST(Effectiveness_Retrieval, FixtureQueriesHitExpectedLanguageFileTop3) {
         }
         EXPECT_TRUE(found) << "query=" << c.query << "\nhits:\n" << files;
     }
+}
+
+TEST(Effectiveness_Retrieval, ExpandedFixtureCorpusMeetsTop1Top3Thresholds) {
+    const auto root = repo_path("tests/fixtures/retrieval");
+    ASSERT_TRUE(fs::exists(root)) << root.string();
+
+    auto index = retrieval_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+    index->attach_symbol_graph(&graph, &extractor);
+    index->index_path(root.string());
+
+    ASSERT_GE(index->file_count(), 29u);
+
+    struct QueryCase {
+        std::string query;
+        std::string expected_path_fragment;
+    };
+    const std::vector<QueryCase> cases = {
+        {"proxy stats auth failures stream cancellation upstream timeout",
+         "cpp/openai_proxy_slice.cpp"},
+        {"debounced search AbortController stale fetch results",
+         "typescript/searchPanel.ts"},
+        {"jsonl ingestion retry exponential backoff batch records",
+         "python/ingest_pipeline.py"},
+        {"production deployment loopback auth unsafe remote proxy request size",
+         "docs/production.md"},
+        {"cmake package config install target onnx runtime redistributable vcpkg",
+         "cmake/CMakeLists.txt"},
+        {"security/auth_middleware_slice.cpp verify_local_proxy_request reject_replay_window allowed_skew_seconds",
+         "security/auth_middleware_slice.cpp"},
+        {"go http retry transport context deadline exponential backoff round trip",
+         "go/http_retry_transport.go"},
+        {"rust workspace cache lru snapshot eviction pathbuf",
+         "rust/workspace_cache.rs"},
+        {"java servlet auth filter hmac preprocessor authorization header",
+         "java/AuthFilter.java"},
+        {"yaml kubernetes deployment readiness probe auth token memory limit",
+         "yaml/kubernetes-deployment.yaml"},
+        {"sql/schema.sql prompt_cache_entries embedding_vectors request_audit_log schema",
+         "sql/schema.sql"},
+        {"cpp context budget guard elides duplicate chunks by score",
+         "cpp/context_budget_guard.cpp"},
+        {"typescript buildContextGraphRows RetrievalDiagnostic topKPreview graphLift nearMiss",
+         "typescript/contextGraphPanel.ts"},
+        {"python baseline comparison ndjson snapshot regression delta",
+         "python/baseline_compare.py"},
+        {"go embedding cache warmer prefetches repository retrieval vectors",
+         "go/cache_warmer.go"},
+        {"rust upstream stream cancellation aborts sink on disconnect",
+         "rust/stream_cancel.rs"},
+        {"java/ModelRoutingPolicy.java chooseTier CodeGenerate requestChars frontier fallback",
+         "java/ModelRoutingPolicy.java"},
+        {"yaml prometheus alert retrieval accuracy stream cancellation",
+         "yaml/observability-rules.yaml"},
+        {"sql dashboard history retention baseline snapshots",
+         "sql/retention_policy.sql"},
+        {"cmake package smoke imported target onnx runtime install",
+         "cmake/PackageSmoke.cmake"},
+        {"security tenant hmac nonce replay preprocessor authorization",
+         "security/tenant_auth_policy.cpp"},
+        {"markdown retrieval debugging near miss expected rank diagnostics",
+         "docs/retrieval-debugging.md"},
+        {"python auth dependency override verify bearer token request state",
+         "realworld/python/service_auth.py"},
+        {"typescript agent context store retrieval window persistence budget",
+         "realworld/typescript/agent_context_store.ts"},
+        {"cpp stream forwarder cancel upstream on client disconnect idle timeout",
+         "realworld/cpp/stream_forwarder.cpp"},
+        {"config validation rejects non loopback bind address unsafe_allow_remote_proxy max_request_bytes json parsing",
+         "cpp/config_loader_slice.cpp"},
+        {"yaml github actions ci windows vsdevcmd ctest smoke effectiveness upload release artifacts",
+         "yaml/github-actions-ci.yml"},
+        {"cmake release package staging sha256 checksum artifact publishing",
+         "cmake/release-package.cmake"},
+        {"toml runtime config proxy bind_host max_request_bytes upstream openai auth_env graph expansion",
+         "toml/runtime-config.toml"},
+    };
+
+    int top1 = 0;
+    int top3 = 0;
+    std::string misses;
+    for (const auto& c : cases) {
+        const auto hits = index->search(c.query, 3);
+        ASSERT_FALSE(hits.empty()) << c.query;
+        bool top3_hit = false;
+        std::string top1_path = normalized_path(hits.front().chunk.file_path);
+        for (std::size_t i = 0; i < hits.size(); ++i) {
+            if (path_contains_fragment(hits[i].chunk.file_path, c.expected_path_fragment)) {
+                top3_hit = true;
+                if (i == 0) ++top1;
+                break;
+            }
+        }
+        if (!path_contains_fragment(top1_path, c.expected_path_fragment)) {
+            misses += "query=" + c.query + "\nexpected=" + c.expected_path_fragment +
+                      "\ntop1=" + top1_path + "\n";
+        }
+        if (top3_hit) ++top3;
+    }
+
+    const double top1_pct = 100.0 * top1 / cases.size();
+    const double top3_pct = 100.0 * top3 / cases.size();
+    EXPECT_GE(top1_pct, 85.0) << "top1=" << top1 << "/" << cases.size()
+                              << "\n" << misses;
+    EXPECT_GE(top3_pct, 95.0) << "top3=" << top3 << "/" << cases.size();
 }
 
 TEST(Effectiveness_Retrieval, NearMissRegressionQueriesRankExpectedFileTop1) {

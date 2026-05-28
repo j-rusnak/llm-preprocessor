@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -23,6 +24,12 @@ protected:
         auto from_build_dir = fs::path("..") / relative_path;
         if (fs::exists(from_build_dir)) return from_build_dir.string();
         return relative_path;
+    }
+
+    std::string read_file(const std::string& path) const {
+        std::ifstream f(path);
+        return std::string(std::istreambuf_iterator<char>(f),
+                           std::istreambuf_iterator<char>());
     }
 
     void TearDown() override {
@@ -176,9 +183,42 @@ TEST_F(ConfigLoaderTest, RejectsSecuredLanExampleUntilTokenReplaced) {
     EXPECT_THROW(preprocessor::ConfigLoader::load(path), std::invalid_argument);
 }
 
+TEST_F(ConfigLoaderTest, LoadsCopiedLanExampleAfterPlaceholderTokenReplaced) {
+    const auto path = repo_file("config.lan.example.json");
+    ASSERT_TRUE(std::filesystem::exists(path)) << path;
+
+    auto content = read_file(path);
+    const std::string placeholder = "replace-with-strong-lan-proxy-token";
+    const std::string deployment_token = "team-lan-proxy-token-alpha";
+    const auto pos = content.find(placeholder);
+    ASSERT_NE(pos, std::string::npos);
+    content.replace(pos, placeholder.size(), deployment_token);
+    write_config(content);
+
+    auto config = preprocessor::ConfigLoader::load(temp_path_);
+
+    EXPECT_EQ(config.proxy_host, "0.0.0.0");
+    ASSERT_EQ(config.proxy_auth_bearer_tokens.size(), 1u);
+    EXPECT_EQ(config.proxy_auth_bearer_tokens[0], deployment_token);
+    EXPECT_FALSE(config.allow_unsafe_remote_proxy);
+    EXPECT_FALSE(config.proxy_forward_client_authorization);
+    EXPECT_GT(config.proxy_max_request_bytes, 0u);
+    EXPECT_GT(config.proxy_rate_limit_tokens_per_second, 0.0);
+    EXPECT_GT(config.proxy_rate_limit_burst, 0.0);
+}
+
 TEST_F(ConfigLoaderTest, RejectsNonLoopbackProxyWithoutAuthByDefault) {
     write_config(R"({"proxy_host": "0.0.0.0"})");
     EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_), std::invalid_argument);
+}
+
+TEST_F(ConfigLoaderTest, RejectsRemoteServingUnlessUnsafeFlagExplicitlyTrue) {
+    write_config(R"({
+        "proxy_host": "0.0.0.0",
+        "allow_unsafe_remote_proxy": false
+    })");
+    EXPECT_THROW(preprocessor::ConfigLoader::load(temp_path_),
+                 std::invalid_argument);
 }
 
 TEST_F(ConfigLoaderTest, RejectsEmptyUpstreamUrl) {
