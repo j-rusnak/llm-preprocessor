@@ -147,6 +147,29 @@ find_package(hnswlib CONFIG REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 find_package(efsw CONFIG REQUIRED)
 
+include(CheckCXXSourceCompiles)
+get_target_property(_efsw_includes efsw::efsw INTERFACE_INCLUDE_DIRECTORIES)
+set(_previous_required_includes "${CMAKE_REQUIRED_INCLUDES}")
+if(_efsw_includes)
+    set(CMAKE_REQUIRED_INCLUDES ${_efsw_includes})
+endif()
+check_cxx_source_compiles([=[
+    #include <string>
+    #include <efsw/efsw.hpp>
+    class ProbeListener : public efsw::FileWatchListener {
+    public:
+        void handleFileAction(efsw::WatchID,
+                              const std::string&,
+                              const std::string&,
+                              efsw::Action,
+                              const std::string&) override {}
+    };
+    int main() { return 0; }
+]=] LLM_PREPROCESSOR_EFSW_OLD_FILENAME_CONST_REF)
+set(CMAKE_REQUIRED_INCLUDES "${_previous_required_includes}")
+unset(_previous_required_includes)
+unset(_efsw_includes)
+
 # --- Phase 1 dependencies ---
 find_package(httplib CONFIG REQUIRED)
 
@@ -165,6 +188,12 @@ target_link_libraries(preprocessor_lib PUBLIC
     httplib::httplib
     pantor::inja
 )
+
+if(LLM_PREPROCESSOR_EFSW_OLD_FILENAME_CONST_REF)
+    target_compile_definitions(preprocessor_lib PRIVATE
+        LLM_PREPROCESSOR_EFSW_OLD_FILENAME_CONST_REF=1
+    )
+endif()
 
 # --- 3. Define the Main Executable ---
 add_executable(preprocessor_app src/main.cpp)

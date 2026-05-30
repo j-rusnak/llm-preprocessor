@@ -27,7 +27,11 @@ public:
                           const std::string& dir,
                           const std::string& filename,
                           efsw::Action action,
+#ifdef LLM_PREPROCESSOR_EFSW_OLD_FILENAME_CONST_REF
+                          const std::string& oldFilename) override {
+#else
                           std::string oldFilename) override {
+#endif
         if (!cb_) return;
         FileEvent ev;
         ev.type = to_file_event_type(action);

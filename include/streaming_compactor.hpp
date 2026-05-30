@@ -38,7 +38,8 @@ public:
         std::size_t keep_recent = 4;
     };
 
-    explicit StreamingCompactor(Config cfg = {}) : cfg_(cfg) {}
+    StreamingCompactor() = default;
+    explicit StreamingCompactor(Config cfg) : cfg_(cfg) {}
 
     /// Compact the chat history.
     CompactionResult compact(const std::vector<ChatTurn>& history) const;
