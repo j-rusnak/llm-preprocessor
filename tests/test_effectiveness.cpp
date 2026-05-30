@@ -162,6 +162,20 @@ bool find_chunk_by_path_fragment(const preprocessor::RepoIndex& index,
     return false;
 }
 
+bool find_chunk_by_path_fragment_and_text(const preprocessor::RepoIndex& index,
+                                          const std::string& fragment,
+                                          const std::string& text,
+                                          preprocessor::CodeChunk& out) {
+    for (auto chunk : index.snapshot_chunks()) {
+        if (path_contains_fragment(chunk.file_path, fragment) &&
+            chunk.text.find(text) != std::string::npos) {
+            out = std::move(chunk);
+            return true;
+        }
+    }
+    return false;
+}
+
 void hydrate_retrieval_chunks(
     preprocessor::RepoIndex& index,
     const std::vector<preprocessor::CodeChunk>& chunks) {
@@ -738,7 +752,8 @@ TEST(Effectiveness_Retrieval, FixtureGraphExpansionIncludesReferencedDefinition)
     ASSERT_FALSE(has_expected(base, 3));
 
     preprocessor::CodeChunk seed;
-    ASSERT_TRUE(find_chunk_by_path_fragment(*index, "cpp/login_controller.cpp", seed));
+    ASSERT_TRUE(find_chunk_by_path_fragment_and_text(
+        *index, "cpp/login_controller.cpp", "verify_signature", seed));
     std::vector<preprocessor::RetrievedChunk> seeds{{seed, base.front().score}};
 
     preprocessor::GraphExpansionConfig cfg;
