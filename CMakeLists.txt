@@ -271,6 +271,29 @@ install(TARGETS preprocessor_app
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+    install(FILES $<TARGET_RUNTIME_DLLS:preprocessor_app>
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+
+if(WIN32)
+    install(FILES
+        "$<TARGET_FILE_DIR:preprocessor_app>/brotlicommon.dll"
+        "$<TARGET_FILE_DIR:preprocessor_app>/brotlidec.dll"
+        "$<TARGET_FILE_DIR:preprocessor_app>/brotlienc.dll"
+        "$<TARGET_FILE_DIR:preprocessor_app>/efsw.dll"
+        "$<TARGET_FILE_DIR:preprocessor_app>/libcurl.dll"
+        "$<TARGET_FILE_DIR:preprocessor_app>/libcurl-d.dll"
+        "$<TARGET_FILE_DIR:preprocessor_app>/sqlite3.dll"
+        "$<TARGET_FILE_DIR:preprocessor_app>/xxhash.dll"
+        "$<TARGET_FILE_DIR:preprocessor_app>/zlib1.dll"
+        "$<TARGET_FILE_DIR:preprocessor_app>/zlibd1.dll"
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        OPTIONAL
+    )
+endif()
+
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 if(EXISTS "${ORT_ROOT}/include")

@@ -1002,6 +1002,109 @@ TEST(OpenAIProxy, LongStreamingClientDisconnectCancelsUpstreamWithoutCacheWrite)
     EXPECT_LT(up.streaming_chunks_written.load(), up.streaming_chunk_count / 2);
 }
 
+TEST(OpenAIProxy, StreamingClientDisconnectBeforeFirstChunkCancelsUpstream) {
+    ProxyHarness h;
+    FakeUpstream up;
+    up.streaming_response = true;
+    up.streaming_chunk_count = 16;
+    up.streaming_initial_delay_ms = 500;
+    up.streaming_chunk_delay_ms = 5;
+    std::atomic<int> proxy_generated_error_events{0};
+    std::atomic<int> proxy_generated_done_events{0};
+    preprocessor::OpenAIProxyConfig cfg;
+    cfg.streaming_control_event_observer = [&](const std::string& event) {
+        if (event == "error") {
+            proxy_generated_error_events.fetch_add(1);
+        } else if (event == "done") {
+            proxy_generated_done_events.fetch_add(1);
+        }
+    };
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions",
+            cfg);
+
+    json body = {
+        {"model", "gpt-test"},
+        {"stream", true},
+        {"messages", json::array({{{"role", "user"}, {"content", "say hello"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    cli.set_read_timeout(0, 100000);
+    auto r = cli.Post("/v1/chat/completions", body.dump(), "application/json");
+    EXPECT_FALSE(r);
+
+    json metrics;
+    for (int i = 0; i < 200; ++i) {
+        auto stats = cli.Get("/stats");
+        if (stats && stats->status == 200) {
+            metrics = json::parse(stats->body);
+        }
+        if (metrics.value("stream_cancellations_total", 0u) > 0 &&
+            up.streaming_write_failures.load() > 0) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    EXPECT_EQ(metrics.value("stream_cancellations_total", 0u), 1u);
+    EXPECT_EQ(metrics.value("upstream_errors_total", 0u), 0u);
+    EXPECT_EQ(metrics.value("cache_hits", 0u), 0u);
+    EXPECT_EQ(h.cache.size(), 0u);
+    EXPECT_EQ(proxy_generated_error_events.load(), 0);
+    EXPECT_EQ(proxy_generated_done_events.load(), 0);
+    EXPECT_GE(up.streaming_write_failures.load(), 1);
+    EXPECT_EQ(up.streaming_provider_completed.load(), 0);
+}
+
+TEST(OpenAIProxy, RepeatedStreamingClientDisconnectsAccumulateOnlyCancellationMetrics) {
+    ProxyHarness h;
+    FakeUpstream up;
+    up.streaming_response = true;
+    up.streaming_chunk_count = 128;
+    up.streaming_chunk_delay_ms = 2;
+    h.start("http://127.0.0.1:" + std::to_string(up.port) + "/v1/chat/completions");
+
+    json body = {
+        {"model", "gpt-test"},
+        {"stream", true},
+        {"messages", json::array({{{"role", "user"}, {"content", "say hello"}}})}
+    };
+
+    httplib::Client cli("127.0.0.1", h.port);
+    for (int request = 0; request < 2; ++request) {
+        std::string received;
+        auto r = cli.Post(
+            "/v1/chat/completions", httplib::Headers{}, body.dump(), "application/json",
+            [&](const char* data, std::size_t len) {
+                received.append(data, len);
+                return false;
+            });
+        (void)r;
+        EXPECT_NE(received.find("data: {\"choices\""), std::string::npos);
+        EXPECT_EQ(received.find("event: error"), std::string::npos);
+        EXPECT_EQ(received.find("data: [DONE]"), std::string::npos);
+    }
+
+    json metrics;
+    for (int i = 0; i < 200; ++i) {
+        auto stats = cli.Get("/stats");
+        if (stats && stats->status == 200) {
+            metrics = json::parse(stats->body);
+        }
+        if (metrics.value("stream_cancellations_total", 0u) >= 2 &&
+            up.streaming_write_failures.load() >= 2) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    EXPECT_EQ(metrics.value("stream_cancellations_total", 0u), 2u);
+    EXPECT_EQ(metrics.value("upstream_errors_total", 0u), 0u);
+    EXPECT_EQ(metrics.value("cache_hits", 0u), 0u);
+    EXPECT_EQ(h.cache.size(), 0u);
+    EXPECT_GE(up.streaming_write_failures.load(), 2);
+}
+
 TEST(OpenAIProxy, ModelRouterSelectsTierAndRewritesForwardedRequest) {
     ProxyHarness h;
     FakeUpstream default_upstream;

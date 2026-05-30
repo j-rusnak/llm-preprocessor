@@ -634,7 +634,7 @@ TEST(Effectiveness_Retrieval, ExpandedFixtureCorpusMeetsTop1Top3Thresholds) {
 
     const double top1_pct = 100.0 * top1 / cases.size();
     const double top3_pct = 100.0 * top3 / cases.size();
-    EXPECT_GE(top1_pct, 85.0) << "top1=" << top1 << "/" << cases.size()
+    EXPECT_GE(top1_pct, 95.0) << "top1=" << top1 << "/" << cases.size()
                               << "\n" << misses;
     EXPECT_GE(top3_pct, 95.0) << "top3=" << top3 << "/" << cases.size();
 }
@@ -661,6 +661,41 @@ TEST(Effectiveness_Retrieval, NearMissRegressionQueriesRankExpectedFileTop1) {
         {
             "cpp stream forwarder cancel upstream on client disconnect idle timeout",
             "realworld/cpp/stream_forwarder.cpp"
+        },
+    };
+
+    for (const auto& c : cases) {
+        const auto hits = index->search(c.query, 3);
+        ASSERT_FALSE(hits.empty()) << c.query;
+        std::string path = hits.front().chunk.file_path;
+        std::replace(path.begin(), path.end(), '\\', '/');
+        EXPECT_NE(path.find(c.expected_path_fragment), std::string::npos)
+            << "query=" << c.query << "\ntop1=" << path;
+    }
+}
+
+TEST(Effectiveness_Retrieval, CurrentNearMissQueriesRankExpectedFileTop1) {
+    const auto root = repo_path("tests/fixtures/retrieval");
+    ASSERT_TRUE(fs::exists(root)) << root.string();
+
+    auto index = retrieval_index();
+    preprocessor::SymbolGraph graph;
+    preprocessor::RegexSymbolExtractor extractor;
+    index->attach_symbol_graph(&graph, &extractor);
+    index->index_path(root.string());
+
+    struct QueryCase {
+        std::string query;
+        std::string expected_path_fragment;
+    };
+    const std::vector<QueryCase> cases = {
+        {
+            "proxy stats auth failures stream cancellation upstream timeout",
+            "cpp/openai_proxy_slice.cpp"
+        },
+        {
+            "cmake package config install target onnx runtime redistributable vcpkg",
+            "cmake/CMakeLists.txt"
         },
     };
 

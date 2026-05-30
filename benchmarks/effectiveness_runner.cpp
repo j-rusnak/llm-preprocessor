@@ -1396,8 +1396,8 @@ int main() {
                   << fixture["top3_pct"] << "\n";
         thresholds_ok = false;
     }
-    if (fixture.value("top1_pct", 0.0) < 85.0) {
-        std::cerr << "[THRESHOLD] fixture retrieval top-1 below 85%: "
+    if (fixture.value("top1_pct", 0.0) < 95.0) {
+        std::cerr << "[THRESHOLD] fixture retrieval top-1 below 95%: "
                   << fixture["top1_pct"] << "\n";
         thresholds_ok = false;
     }

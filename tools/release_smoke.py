@@ -421,6 +421,21 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
                 timeout_seconds=args.command_timeout_sec,
             )
+            _run(
+                "Release provenance manifest",
+                [
+                    sys.executable,
+                    "tools/release_manifest.py",
+                    str(install_prefix),
+                    "--output",
+                    str(build_dir / "install-check.provenance.json"),
+                    "--repo-root",
+                    str(repo_root),
+                ],
+                cwd=repo_root,
+                dry_run=args.dry_run,
+                timeout_seconds=args.command_timeout_sec,
+            )
 
         print("\nRelease smoke gate completed.")
         return 0

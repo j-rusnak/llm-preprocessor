@@ -56,7 +56,10 @@ Expected result:
 - package audit passes with no runtime state, model files, or archive artifacts
   in the install prefix,
 - `tools\artifact_checksums.py` writes a SHA256 manifest for the install or
-  package outputs.
+  package outputs,
+- `tools\release_manifest.py` writes a provenance JSON manifest that records
+  the Git commit, version output, platform, artifact paths, sizes, and SHA256
+  values.
 
 `tools/release_smoke.py` runs the dashboard browser smoke automatically when
 Python Playwright is installed. To run that check directly:
@@ -105,6 +108,7 @@ Before pushing a release branch to a public repository:
 - confirm `git ls-files -ci --exclude-standard` prints nothing,
 - confirm the package audit reports `status: ok`,
 - generate and retain `SHA256SUMS` with `python tools\artifact_checksums.py`,
+- generate and retain provenance JSON with `python tools\release_manifest.py`,
 - confirm GitGuardian or the repository secret-scanning provider is clean after
   the branch is pushed,
 - confirm any LAN profile was copied privately and edited outside Git.
@@ -122,6 +126,7 @@ The release workflow must pass on Windows, Linux, and macOS:
 - install smoke check,
 - package audit,
 - SHA256 checksum generation,
+- release provenance manifest generation,
 - CTest,
 - smoke runner,
 - effectiveness runner,

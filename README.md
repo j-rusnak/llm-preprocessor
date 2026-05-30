@@ -280,6 +280,10 @@ model routing, auth throughput, and rate limiting. Retrieval effectiveness also
 includes per-language diagnostics, expected-file rank, slowest fixture queries,
 near misses, and graph-expansion counts for dashboard analysis.
 
+The release smoke gate also validates installed artifacts, writes
+`install-check.SHA256SUMS`, and writes `install-check.provenance.json` with the
+Git commit, binary version output, platform, artifact sizes, and SHA256 values.
+
 To visualize those gains over time, run the standalone dashboard:
 
 ```powershell

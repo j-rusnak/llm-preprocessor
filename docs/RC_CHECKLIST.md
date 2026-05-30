@@ -59,12 +59,14 @@ tag until every local and CI gate below is green from a clean checkout.
    git switch --detach v<version>-rc.<n>
    python tools\release_smoke.py
    python tools\artifact_checksums.py build\install-check --output build\install-check.SHA256SUMS
+   python tools\release_manifest.py build\install-check --output build\install-check.provenance.json
    ```
 
 9. Publish the RC only with:
    - the source tag,
    - install or package outputs produced from that tag,
    - the matching `SHA256SUMS` manifest,
+   - the matching provenance JSON manifest,
    - release notes that list any skipped optional Playwright validation.
 
 ## Required Hygiene Gates
@@ -77,6 +79,8 @@ tag until every local and CI gate below is green from a clean checkout.
 - `python tools\package_audit.py <install-prefix>` must report `status: ok`.
 - `python tools\artifact_checksums.py <install-prefix> --output <manifest>`
   must generate the checksum file shipped with the RC artifacts.
+- `python tools\release_manifest.py <install-prefix> --output <manifest.json>`
+  must generate the provenance file shipped with the RC artifacts.
 
 ## CI Release Gate
 
@@ -89,6 +93,7 @@ The public RC branch must pass:
 - configure, build, and install,
 - package audit,
 - SHA256 checksum generation,
+- release provenance manifest generation,
 - CTest,
 - smoke runner,
 - effectiveness runner,
